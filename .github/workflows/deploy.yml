@@ -1,0 +1,60 @@
+# Publishes the games to GitHub Pages on every push to main.
+#
+# Deployment is gated on the test suites, so a level that cannot be won - or one
+# whose declared target time is wrong - never reaches a player. The browser
+# suite runs separately in ci.yml; this one sticks to the fast, dependency-free
+# checks so deploys stay quick.
+#
+# One-time setup: repository Settings -> Pages -> Source: "GitHub Actions".
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue them instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/engine.test.js
+      - run: node tests/solver.test.js
+      - run: node tests/levels.test.js
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the playable files. Tests and workflows stay out of the site.
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r games _site/
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
