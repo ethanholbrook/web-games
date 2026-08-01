@@ -1,0 +1,492 @@
+/* Water Works — presentation only. Colours live in custom properties so the
+   SVG scene built in game.js and the surrounding HTML stay in step. */
+
+:root {
+  --bg: #080b10;
+  --panel: #131a24;
+  --panel-2: #1b2431;
+  --line: #2a3646;
+  --text: #e7edf5;
+  --text-dim: #8ea0b8;
+
+  --water: #1f6fe0;
+  --water-bright: #4aa3ff;
+  --steel: #e9eef5;
+
+  --pipe-idle: #3d4a5c;
+  --pump-off: #55627a;
+  --pump-on: #2ecc71;
+  --pump-starving: #f5a623;
+  --fail: #e74c3c;
+
+  --radius: 10px;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .45);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.app {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 14px clamp(10px, 2vw, 22px) 28px;
+}
+
+/* ------------------------------------------------------------- top bar */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: .3px;
+}
+
+.brand p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+  margin-left: auto;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 92px;
+}
+
+.hud-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--text-dim);
+}
+
+.hud-value { font-size: 16px; }
+.hud-value.is-won { color: var(--pump-on); }
+.hud-value.is-lost { color: var(--fail); }
+.hud-value.is-running { color: var(--water-bright); }
+
+.hud-progress { min-width: 190px; }
+
+.progress {
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--water), var(--water-bright));
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn:hover { background: #24314260; border-color: #3b4b60; }
+.btn:focus-visible { outline: 2px solid var(--water-bright); outline-offset: 2px; }
+
+.btn-primary {
+  background: var(--water);
+  border-color: var(--water-bright);
+  font-weight: 600;
+}
+
+.btn-primary:hover { background: var(--water-bright); }
+
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* -------------------------------------------------------------- layout */
+
+.layout {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 290px;
+  gap: 14px;
+  align-items: start;
+}
+
+.panel {
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.panel h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .9px;
+  color: var(--text-dim);
+}
+
+.panel-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.stage { min-width: 0; }
+
+.stage-inner {
+  margin: 0 auto;
+  aspect-ratio: 1000 / 1080;
+  max-height: calc(100vh - 140px);
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------ controls */
+
+.control-list { display: grid; gap: 14px; }
+
+.control {
+  display: grid;
+  gap: 5px;
+}
+
+.control-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.control-head strong { font-weight: 600; }
+.control-head span { color: var(--water-bright); font-variant-numeric: tabular-nums; }
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--water-bright);
+  cursor: pointer;
+}
+
+.readout {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.readout strong { color: var(--text); }
+
+/* ----------------------------------------------------------- inspector */
+
+.inspector { min-height: 150px; }
+
+.inspector-empty {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.inspector-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+
+.inspector-title b { font-size: 20px; }
+.inspector-title span { font-size: 13px; color: var(--text-dim); }
+
+.inspector-state {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .7px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+}
+
+.inspector-state.is-on { background: rgba(46, 204, 113, .16); color: var(--pump-on); }
+.inspector-state.is-starving { background: rgba(245, 166, 35, .16); color: var(--pump-starving); }
+
+.inspector .btn { width: 100%; margin-bottom: 12px; }
+
+.inspector-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.inspector-stats b {
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.legend-title { margin-top: 18px; }
+
+.legend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.legend li { display: flex; align-items: center; gap: 9px; }
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, .18);
+}
+
+.swatch-off { background: var(--pump-off); }
+.swatch-on { background: var(--pump-on); }
+.swatch-starving { background: var(--pump-starving); }
+.swatch-warn { background: var(--fail); }
+
+/* --------------------------------------------------------------- scene */
+
+.pipe-base {
+  stroke: var(--pipe-idle);
+  stroke-width: 11;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.pipe-flow {
+  stroke: var(--water-bright);
+  stroke-width: 7;
+  stroke-linecap: butt;
+  stroke-dasharray: 16 12;
+  fill: none;
+  opacity: 0;
+}
+
+.pipe-flow.is-flowing { opacity: 1; }
+.pipe-flow.is-starving { stroke: var(--pump-starving); }
+
+.inlet-flow { stroke: var(--water-bright); }
+
+.vat-back { fill: #000; }
+
+.vat-body {
+  fill: none;
+  stroke: var(--steel);
+  stroke-width: 4;
+}
+
+.vat-fill { fill: var(--water); }
+.vat-fill.is-warn { fill: #d9534f; }
+
+.vat-warnline {
+  stroke: rgba(231, 76, 60, .55);
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+}
+
+.vat-body.is-failed { stroke: var(--fail); }
+
+.vat-label {
+  fill: var(--steel);
+  font: 600 20px system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.vat-reading {
+  fill: #cfe0f5;
+  font: 500 15px/1 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.reservoir-label { font-size: 26px; }
+.reservoir-reading { font-size: 20px; fill: var(--steel); }
+
+.pump { cursor: pointer; }
+.pump:focus { outline: none; }
+
+.pump-box {
+  fill: var(--pump-off);
+  stroke: #0b0f14;
+  stroke-width: 2;
+  rx: 6;
+}
+
+.pump.is-on .pump-box { fill: var(--pump-on); }
+.pump.is-starving .pump-box { fill: var(--pump-starving); }
+.pump.is-failed .pump-box { fill: var(--fail); }
+.pump.is-selected .pump-box { stroke: #fff; stroke-width: 3; }
+.pump:focus-visible .pump-box { stroke: var(--water-bright); stroke-width: 3; }
+.pump:hover .pump-box { filter: brightness(1.18); }
+
+.pump-label {
+  fill: #08111d;
+  font: 700 14px system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.pump-rate {
+  fill: var(--text-dim);
+  font: 500 11px system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.pump.is-on .pump-rate, .pump.is-starving .pump-rate { fill: var(--steel); }
+
+.pump.is-starving .pump-box { animation: pulse .7s ease-in-out infinite; }
+
+@keyframes pulse {
+  50% { opacity: .45; }
+}
+
+/* --------------------------------------------------------------- modal */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 7, 11, .78);
+  z-index: 20;
+}
+
+.modal-backdrop[hidden] { display: none; }
+
+.modal {
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 22px 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.modal h2 { margin: 0 0 12px; font-size: 20px; }
+.modal-body { font-size: 14px; color: #c8d4e4; }
+.modal-body p { margin: 0 0 10px; }
+.modal-body ul { margin: 0 0 12px; padding-left: 20px; }
+.modal-body li { margin-bottom: 5px; }
+.modal-body kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  font: 12px ui-monospace, monospace;
+}
+.modal-body .result-headline { font-size: 16px; font-weight: 600; color: var(--text); }
+.modal-body .result-headline.is-won { color: var(--pump-on); }
+.modal-body .result-headline.is-lost { color: var(--fail); }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ---------------------------------------------------------- responsive */
+
+@media (max-width: 1180px) {
+  .layout { grid-template-columns: 1fr; }
+  .stage { order: -1; }
+  .stage-inner { max-height: none; max-width: 620px; }
+  .panel-inlets .control-list { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .hud { width: 100%; margin-left: 0; }
+  .actions { width: 100%; }
+  .actions .btn { flex: 1; }
+
+  /* Below this the whole plant is too small to aim at, so let the diagram
+     scroll inside its own box rather than shrinking further. */
+  .stage { overflow-x: auto; }
+  .stage-inner { min-width: 520px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipe-flow { stroke-dasharray: none; }
+  .pump.is-starving .pump-box { animation: none; }
+}
