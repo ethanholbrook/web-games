@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The simulation, the solver, and every shipped level. No dependencies -
+      # these run against the same files the browser loads.
+      - name: Simulation tests
+        run: node tests/engine.test.js
+
+      - name: Solver tests
+        run: node tests/solver.test.js
+
+      - name: Level validation
+        run: node tests/levels.test.js
+
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: node tests/browser.test.mjs

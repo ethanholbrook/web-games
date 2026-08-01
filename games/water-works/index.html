@@ -3,19 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Water Works — Level 1</title>
-<meta name="description" content="A process-control puzzle: route water through 23 pumps to fill Vat 10 without overflowing a vat or running a pump dry.">
+<title>Water Works</title>
+<meta name="description" content="A plumbing puzzle: switch the right pumps in the right order to fill the reservoir without overflowing a vat or running a pump dry.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23080b10'/%3E%3Cpath d='M16 5c5 6.5 7.5 10 7.5 13.2A7.5 7.5 0 0 1 16 26a7.5 7.5 0 0 1-7.5-7.8C8.5 15 11 11.5 16 5z' fill='%234aa3ff'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="app">
-
-  <header class="topbar">
-    <div class="brand">
+<!-- ------------------------------------------------------- level select -->
+<section class="app" id="screen-select">
+  <header class="select-head">
+    <div>
       <h1>Water Works</h1>
-      <p id="level-name">Level 1</p>
+      <p>Switch the right pumps, in the right order, to fill the reservoir.
+         Don't overflow a vat. Don't run a pump dry.</p>
+    </div>
+    <a class="btn" href="../../index.html">All games</a>
+  </header>
+
+  <h2 class="section-title">Daily</h2>
+  <div class="level-grid" id="daily-grid"></div>
+
+  <h2 class="section-title">Campaign</h2>
+  <div class="level-grid" id="campaign-grid"></div>
+
+  <h2 class="section-title">Free play</h2>
+  <div class="level-grid" id="sandbox-grid"></div>
+</section>
+
+<!-- --------------------------------------------------------------- play -->
+<section class="app" id="screen-play" hidden>
+  <header class="topbar">
+    <button type="button" class="btn btn-back" id="btn-back">← Levels</button>
+
+    <div class="brand">
+      <h1 id="level-name">Level</h1>
+      <p id="level-blurb"></p>
     </div>
 
     <div class="hud">
@@ -27,29 +50,32 @@
         <span class="hud-label">Elapsed</span>
         <strong id="hud-time" class="hud-value tabular">0:00.0</strong>
       </div>
-      <div class="hud-item">
-        <span class="hud-label">Into Vat 10</span>
+      <div class="hud-item" id="hud-moves-item">
+        <span class="hud-label">Switches</span>
+        <strong id="hud-moves" class="hud-value tabular">0</strong>
+      </div>
+      <div class="hud-item" id="hud-outflow-item" hidden>
+        <span class="hud-label">Into reservoir</span>
         <strong id="hud-outflow" class="hud-value tabular">0.0 gal/s</strong>
       </div>
       <div class="hud-item hud-progress">
-        <span class="hud-label">Vat 10 <span id="hud-progress-label" class="tabular">0%</span></span>
-        <div class="progress" role="progressbar" aria-labelledby="hud-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hud-progress">
+        <span class="hud-label">Reservoir <span id="hud-progress-label" class="tabular">0%</span></span>
+        <div class="progress" role="progressbar" aria-labelledby="hud-progress-label"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hud-progress">
           <div class="progress-fill" id="hud-progress-fill"></div>
         </div>
       </div>
     </div>
 
     <div class="actions">
-      <button type="button" id="btn-new" class="btn">New Game</button>
       <button type="button" id="btn-start" class="btn btn-primary">Start</button>
+      <button type="button" id="btn-restart" class="btn">Restart</button>
       <button type="button" id="btn-help" class="btn">How to Play</button>
-      <a class="btn" href="../../index.html">Quit Game</a>
     </div>
   </header>
 
-  <main class="layout">
-
-    <aside class="panel panel-inlets">
+  <main class="layout" id="layout">
+    <aside class="panel panel-inlets" id="panel-inlets">
       <h2>Inlet feeds</h2>
       <p class="panel-hint">Water enters the plant here. Open them before starting any pump.</p>
       <div id="inlet-list" class="control-list"></div>
@@ -60,27 +86,19 @@
     </aside>
 
     <section class="stage">
-      <div class="stage-inner">
-        <svg id="scene" viewBox="0 0 1000 1080" preserveAspectRatio="xMidYMid meet"
-             role="group" aria-label="Plant diagram: ten vats connected by twenty-three pumps"></svg>
+      <div class="stage-inner" id="stage-inner">
+        <svg id="scene" preserveAspectRatio="xMidYMid meet"
+             role="group" aria-label="Plant diagram"></svg>
       </div>
+      <p class="stage-hint" id="stage-hint"></p>
     </section>
 
-    <aside class="panel panel-inspector">
+    <aside class="panel panel-inspector" id="panel-inspector">
       <h2>Pump inspector</h2>
       <div id="inspector" class="inspector"></div>
-
-      <h2 class="legend-title">Legend</h2>
-      <ul class="legend">
-        <li><span class="swatch swatch-off"></span> Pump off</li>
-        <li><span class="swatch swatch-on"></span> Pumping</li>
-        <li><span class="swatch swatch-starving"></span> Starving — feed it within 2s</li>
-        <li><span class="swatch swatch-warn"></span> Vat above 85% — overflow risk</li>
-      </ul>
     </aside>
-
   </main>
-</div>
+</section>
 
 <div class="modal-backdrop" id="modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -90,8 +108,11 @@
   </div>
 </div>
 
-<script src="level1.js"></script>
+<script src="geometry.js"></script>
+<script src="levels.js"></script>
 <script src="engine.js"></script>
+<script src="solver.js"></script>
+<script src="daily.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

@@ -53,6 +53,7 @@
     burstThreshold: 0.85,  // fraction of capacity a burst pump waits for
     maxTime: 180,          // seconds of simulated time
     quantiseLevel: 0.05,
+    deadline: undefined,   // absolute Date.now() past which to give up
     marginRetries: [1.0, 2.0, 4.0]
   };
 
@@ -160,11 +161,6 @@
   }
 
   /**
-   * Collect balanced sets of at most `maxCount` pumps. A set is balanced when
-   * no vat is asked for more than it receives, and some water reaches the
-   * reservoir.
-   */
-  /**
    * How much faster than its supply a vat may be drained and still last the
    * run. A vat holding C gallons losing d gal/s survives C/d seconds, and the
    * run cannot possibly be shorter than filling the reservoir at full tilt, so
@@ -183,6 +179,11 @@
     return allowance;
   }
 
+  /**
+   * Collect sets of at most `maxCount` pumps where no vat is asked for more
+   * than it receives (plus any deficit `allowance` permits), and some water
+   * reaches the reservoir.
+   */
   function enumerateBalanced(model, opts, maxCount, allowance) {
     var candidates = [];
     var inflow = new Float64Array(model.n);
@@ -310,11 +311,17 @@
     };
   }
 
+  function expired(opts) {
+    return opts.deadline !== undefined && Date.now() > opts.deadline;
+  }
+
   function balancedSolve(level, model, opts, allowance) {
     for (var size = 1; size <= Math.min(opts.maxMoves, model.pumps.length); size++) {
+      if (expired(opts)) return null;
       var candidates = enumerateBalanced(model, opts, size, allowance);
       for (var c = 0; c < candidates.length; c++) {
         if (candidates[c].count !== size) continue;
+        if (expired(opts)) return null;
         var ids = candidates[c].pumps.map(function (k) { return model.pumps[k].id; });
         var played = playSet(level, ids, opts);
         if (played.won) return played;
@@ -469,6 +476,9 @@
 
     while (open.items.length) {
       if (++expanded > opts.maxNodes) return { solved: false, reason: 'node limit', expanded: expanded };
+      if ((expanded & 255) === 0 && expired(opts)) {
+        return { solved: false, reason: 'out of time', expanded: expanded };
+      }
 
       var node = open.pop();
       var resNet = rates(model, node.mask, net, outflow);

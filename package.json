@@ -1,0 +1,12 @@
+{
+  "name": "web-games",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser games with no build step. The games need nothing installed; this file only exists to drive the tests.",
+  "scripts": {
+    "test": "node tests/engine.test.js && node tests/solver.test.js && node tests/levels.test.js",
+    "test:browser": "node tests/browser.test.mjs",
+    "test:all": "npm test && npm run test:browser",
+    "serve": "python3 -m http.server 8000"
+  }
+}

@@ -1,35 +1,43 @@
 /*
- * Water Works - rendering, input and the frame loop.
+ * Water Works - screens, rendering and input.
  *
- * The SVG scene is built once from level1.js and cached by id; every frame only
- * mutates attributes on existing nodes, never creates them. Simulation runs on a
- * fixed-timestep accumulator so play is identical at 30fps and 144fps.
+ * Two modes share one renderer. PUZZLE levels have fixed rates printed on the
+ * pipes and are played entirely with the pump switches; SANDBOX exposes every
+ * rate as a slider. The scene is rebuilt only when the level changes - each
+ * frame just mutates attributes on cached nodes.
+ *
+ * Simulation runs on a fixed-timestep accumulator, so play is identical at
+ * 30fps and 144fps, and toggling is allowed while paused: the puzzle is meant
+ * to be a thinking problem, not a reflex test.
  */
 (function () {
   'use strict';
 
   var W = window.WaterWorks;
-  var LEVEL = W.LEVEL1;
-  var CFG = LEVEL.config;
   var SVG_NS = 'http://www.w3.org/2000/svg';
-
-  var SIM_DT = 1 / CFG.simHz;
   var MAX_STEPS_PER_FRAME = 15;
   var DASH_UNITS_PER_GALLON = 3.2;
-  var BEST_TIME_KEY = 'waterworks.level1.best';
+  var PROGRESS_KEY = 'waterworks.progress.v1';
 
-  var game = W.createGame(LEVEL);
-  var scene = document.getElementById('scene');
+  var GLYPH = { on: '▶', off: '■', starving: '!' };
+
+  var level = null;
+  var game = null;
+  var spec = null;
   var nodes = { vats: {}, pumps: {}, inlets: [] };
   var inspector = { pumpId: null, refs: null };
   var selectedId = null;
   var acc = 0;
   var lastTs = 0;
+  var running = false;
+
   var reducedMotion = window.matchMedia
     ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
     : false;
 
   // ------------------------------------------------------------ utilities
+
+  function $(id) { return document.getElementById(id); }
 
   function svg(tag, attrs) {
     var node = document.createElementNS(SVG_NS, tag);
@@ -46,27 +54,17 @@
     return node;
   }
 
-  /* Cached setters - the frame loop calls these on every node, every frame. */
   function setAttr(node, name, value) {
     var key = '__a_' + name;
-    if (node[key] !== value) {
-      node[key] = value;
-      node.setAttribute(name, value);
-    }
+    if (node[key] !== value) { node[key] = value; node.setAttribute(name, value); }
   }
 
   function setClass(node, value) {
-    if (node.__cls !== value) {
-      node.__cls = value;
-      node.setAttribute('class', value);
-    }
+    if (node.__cls !== value) { node.__cls = value; node.setAttribute('class', value); }
   }
 
   function setText(node, value) {
-    if (node.__txt !== value) {
-      node.__txt = value;
-      node.textContent = value;
-    }
+    if (node.__txt !== value) { node.__txt = value; node.textContent = value; }
   }
 
   function fmtTime(seconds) {
@@ -77,52 +75,159 @@
 
   function fmtRate(gps) { return gps.toFixed(1) + ' gal/s'; }
 
-  function readBestTime() {
-    try {
-      var raw = window.localStorage.getItem(BEST_TIME_KEY);
-      return raw === null ? null : parseFloat(raw);
-    } catch (err) { return null; }
+  // --------------------------------------------------------------- storage
+
+  function loadProgress() {
+    try { return JSON.parse(window.localStorage.getItem(PROGRESS_KEY)) || {}; }
+    catch (err) { return {}; }
   }
 
-  function writeBestTime(seconds) {
-    try { window.localStorage.setItem(BEST_TIME_KEY, String(seconds)); } catch (err) { /* private mode */ }
+  function saveProgress(progress) {
+    try { window.localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress)); }
+    catch (err) { /* private mode - progress just won't persist */ }
   }
 
-  // -------------------------------------------------------------- building
+  function recordWin(levelId, moves, seconds) {
+    var progress = loadProgress();
+    var previous = progress[levelId];
+    if (!previous || moves < previous.moves || (moves === previous.moves && seconds < previous.time)) {
+      progress[levelId] = { moves: moves, time: seconds };
+      saveProgress(progress);
+      return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------- level select
+
+  var dailyCache = null;
+
+  function getDaily() {
+    if (dailyCache === undefined || dailyCache === null) {
+      dailyCache = W.dailyFor ? W.dailyFor(new Date()) : null;
+    }
+    return dailyCache;
+  }
+
+  function levelCard(spec, meta) {
+    var card = el('button', 'card');
+    card.type = 'button';
+
+    var head = el('div', 'card-head');
+    head.appendChild(el('h3', null, spec.name));
+    if (meta.best) head.appendChild(el('span', 'card-best', '★ ' + meta.best.moves));
+    card.appendChild(head);
+
+    card.appendChild(el('p', null, spec.blurb || ''));
+
+    var tags = el('div', 'tags');
+    if (spec.mode === 'sandbox') {
+      tags.appendChild(el('span', 'tag', 'Free play'));
+    } else {
+      tags.appendChild(el('span', 'tag', 'Par ' + spec.par));
+      tags.appendChild(el('span', 'tag',
+        spec.pumps.length + (spec.pumps.length === 1 ? ' pump' : ' pumps')));
+      if (spec.timeLimit) tags.appendChild(el('span', 'tag tag-warn', spec.timeLimit + 's limit'));
+    }
+    if (meta.best) tags.appendChild(el('span', 'tag tag-done', 'Solved'));
+    card.appendChild(tags);
+
+    card.addEventListener('click', function () { startLevel(spec); });
+    return card;
+  }
+
+  function buildSelect() {
+    var progress = loadProgress();
+
+    var campaign = $('campaign-grid');
+    campaign.textContent = '';
+    W.CAMPAIGN_SPECS.forEach(function (spec) {
+      campaign.appendChild(levelCard(spec, { best: progress[spec.id] }));
+    });
+
+    var sandbox = $('sandbox-grid');
+    sandbox.textContent = '';
+    sandbox.appendChild(levelCard(W.SANDBOX_SPEC, { best: null }));
+
+    var dailyHost = $('daily-grid');
+    dailyHost.textContent = '';
+    var daily = getDaily();
+    if (daily) {
+      var key = 'daily-' + daily.dayNumber;
+      dailyHost.appendChild(levelCard(daily.spec, { best: progress[key] }));
+    } else {
+      dailyHost.appendChild(el('p', 'panel-hint', 'Today’s puzzle could not be generated.'));
+    }
+  }
+
+  function showSelect() {
+    running = false;
+    $('screen-play').hidden = true;
+    $('screen-select').hidden = false;
+    buildSelect();
+    if (window.history.replaceState) window.history.replaceState(null, '', location.pathname);
+  }
+
+  // ---------------------------------------------------------- scene build
+
+  function progressKeyFor(spec) {
+    return spec.daily ? 'daily-' + spec.dayNumber : spec.id;
+  }
 
   function buildScene() {
+    var scene = $('scene');
+    scene.textContent = '';
+    scene.setAttribute('viewBox', '0 0 ' + level.view.width + ' ' + level.view.height);
+    $('stage-inner').style.aspectRatio = level.view.width + ' / ' + level.view.height;
+
+    nodes = { vats: {}, pumps: {}, inlets: [] };
+
     var layerPipes = svg('g', {});
     var layerVats = svg('g', {});
+    var layerLabels = svg('g', {});
     var layerPumps = svg('g', {});
+    var puzzle = level.mode === 'puzzle';
 
-    LEVEL.inlets.forEach(function (inlet) {
+    level.inlets.forEach(function (inlet) {
       layerPipes.appendChild(svg('path', { d: inlet.path, class: 'pipe-base' }));
       var flow = svg('path', { d: inlet.path, class: 'pipe-flow inlet-flow' });
       layerPipes.appendChild(flow);
       nodes.inlets.push({ def: inlet, flow: flow, dash: 0 });
+
+      if (puzzle) {
+        var vat = level.vatById[inlet.target];
+        var badge = svg('text', { class: 'rate-badge', x: vat.cx + 34, y: 34 });
+        badge.textContent = inlet.rate;
+        layerLabels.appendChild(badge);
+      }
     });
 
-    LEVEL.pumps.forEach(function (pump) {
+    level.pumps.forEach(function (pump) {
       layerPipes.appendChild(svg('path', { d: pump.path, class: 'pipe-base' }));
       var flow = svg('path', { d: pump.path, class: 'pipe-flow' });
       layerPipes.appendChild(flow);
       nodes.pumps[pump.id] = { def: pump, flow: flow, dash: 0 };
+
+      // In puzzle mode the rate belongs to the pipe, not the switch - it never
+      // changes, so it reads as a property of the plant.
+      if (puzzle) {
+        var badge = svg('text', { class: 'rate-badge', x: pump.labelX, y: pump.labelY });
+        badge.textContent = pump.rate;
+        layerLabels.appendChild(badge);
+      }
     });
 
-    LEVEL.vats.forEach(function (vat) {
+    level.vats.forEach(function (vat) {
       var group = svg('g', {});
       var isRes = !!vat.reservoir;
 
       group.appendChild(svg('rect', { class: 'vat-back', x: vat.x, y: vat.y, width: vat.w, height: vat.h }));
 
-      var fill = svg('rect', {
-        class: 'vat-fill', x: vat.x + 2, y: vat.y + vat.h, width: vat.w - 4, height: 0
-      });
+      var fill = svg('rect', { class: 'vat-fill', x: vat.x + 2, y: vat.y + vat.h, width: vat.w - 4, height: 0 });
       group.appendChild(fill);
 
-      // Overflow threshold, drawn as edge ticks so it never crosses the label.
       if (!isRes) {
-        var warnY = vat.y + vat.h * (1 - CFG.warnFraction);
+        var warnY = vat.y + vat.h * (1 - level.config.warnFraction);
         [[vat.x, vat.x + 30], [vat.x + vat.w - 30, vat.x + vat.w]].forEach(function (span) {
           group.appendChild(svg('line', {
             class: 'vat-warnline', x1: span[0], y1: warnY, x2: span[1], y2: warnY
@@ -137,7 +242,7 @@
         class: 'vat-label' + (isRes ? ' reservoir-label' : ''),
         x: vat.cx, y: vat.y + (isRes ? 44 : 28)
       });
-      label.textContent = isRes ? 'Vat 10' : 'V' + vat.id.slice(1);
+      label.textContent = isRes ? vat.label : vat.id;
       group.appendChild(label);
 
       var reading = svg('text', {
@@ -150,9 +255,9 @@
       nodes.vats[vat.id] = { def: vat, fill: fill, body: body, reading: reading };
     });
 
-    LEVEL.pumps.forEach(function (pump) {
-      var bw = LEVEL.button.w;
-      var bh = LEVEL.button.h;
+    level.pumps.forEach(function (pump) {
+      var bw = level.button.w;
+      var bh = level.button.h;
       var group = svg('g', { class: 'pump', tabindex: '0', role: 'button' });
 
       group.appendChild(svg('rect', {
@@ -160,21 +265,32 @@
         width: bw, height: bh, rx: 6
       }));
 
-      var label = svg('text', { class: 'pump-label', x: pump.buttonX, y: pump.buttonY - 4 });
+      // The glyph carries the same information as the colour, so on/off/
+      // starving stay distinguishable without relying on hue.
+      var glyph = svg('text', { class: 'pump-glyph', x: pump.buttonX - 15, y: pump.buttonY + 1 });
+      group.appendChild(glyph);
+
+      var label = svg('text', { class: 'pump-label', x: pump.buttonX + 7, y: pump.buttonY + 1 });
       label.textContent = pump.id;
       group.appendChild(label);
 
-      var rate = svg('text', { class: 'pump-rate', x: pump.buttonX, y: pump.buttonY + 8 });
-      group.appendChild(rate);
+      var rate = puzzle ? null : svg('text', { class: 'pump-rate', x: pump.buttonX, y: pump.buttonY + 11 });
+      if (rate) {
+        setAttr(label, 'y', pump.buttonY - 4);
+        setAttr(glyph, 'y', pump.buttonY - 4);
+        group.appendChild(rate);
+      }
 
       wirePump(group, pump.id);
       layerPumps.appendChild(group);
       nodes.pumps[pump.id].group = group;
+      nodes.pumps[pump.id].glyph = glyph;
       nodes.pumps[pump.id].rateText = rate;
     });
 
     scene.appendChild(layerPipes);
     scene.appendChild(layerVats);
+    scene.appendChild(layerLabels);
     scene.appendChild(layerPumps);
   }
 
@@ -190,16 +306,17 @@
         event.preventDefault();
         game.togglePump(id);
         select(id);
-      } else if (event.key === 'ArrowUp' || event.key === 'ArrowRight') {
+      } else if (level.mode === 'sandbox' && (event.key === 'ArrowUp' || event.key === 'ArrowRight')) {
         event.preventDefault();
         nudgeRate(id, 1);
-      } else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') {
+      } else if (level.mode === 'sandbox' && (event.key === 'ArrowDown' || event.key === 'ArrowLeft')) {
         event.preventDefault();
         nudgeRate(id, -1);
       }
     });
 
     group.addEventListener('wheel', function (event) {
+      if (level.mode !== 'sandbox') return;
       event.preventDefault();
       nudgeRate(id, event.deltaY < 0 ? 1 : -1);
       select(id);
@@ -209,12 +326,14 @@
   }
 
   function nudgeRate(id, direction) {
-    game.setPumpRate(id, game.pumps[id].rate + direction * CFG.rateStep);
+    game.setPumpRate(id, game.pumps[id].rate + direction * level.config.rateStep);
     select(id);
   }
 
+  // --------------------------------------------------------- sandbox panels
+
   function buildInletControls() {
-    var host = document.getElementById('inlet-list');
+    var host = $('inlet-list');
     host.textContent = '';
 
     game.inlets.forEach(function (inlet, index) {
@@ -228,8 +347,8 @@
       var slider = document.createElement('input');
       slider.type = 'range';
       slider.min = '0';
-      slider.max = String(CFG.maxInletRate);
-      slider.step = String(CFG.rateStep);
+      slider.max = String(level.config.maxInletRate);
+      slider.step = String(level.config.rateStep);
       slider.value = String(inlet.rate);
       slider.setAttribute('aria-label', inlet.description + ' rate, gallons per second');
       slider.addEventListener('input', function () {
@@ -239,29 +358,26 @@
 
       wrap.appendChild(slider);
       host.appendChild(wrap);
-      nodes.inlets[index].slider = slider;
       nodes.inlets[index].valueText = value;
     });
   }
 
-  // ------------------------------------------------------------- inspector
-
   function select(id) {
     if (selectedId === id) return;
     selectedId = id;
-    buildInspector();
+    if (level.mode === 'sandbox') buildInspector();
   }
 
   function buildInspector() {
-    var host = document.getElementById('inspector');
+    var host = $('inspector');
     host.textContent = '';
     inspector.pumpId = selectedId;
     inspector.refs = null;
 
     if (!selectedId) {
       host.appendChild(el('p', 'inspector-empty',
-        'Click a pump in the diagram to switch it on and tune its rate. ' +
-        'Shift-click selects without toggling; the scroll wheel adjusts a rate in place.'));
+        'Click a pump to switch it on and tune its rate. Shift-click selects without '
+        + 'toggling; the scroll wheel adjusts a rate in place.'));
       return;
     }
 
@@ -288,8 +404,8 @@
     var slider = document.createElement('input');
     slider.type = 'range';
     slider.min = '0';
-    slider.max = String(CFG.maxPumpRate);
-    slider.step = String(CFG.rateStep);
+    slider.max = String(level.config.maxPumpRate);
+    slider.step = String(level.config.rateStep);
     slider.value = String(pump.rate);
     slider.setAttribute('aria-label', pump.id + ' rate, gallons per second');
     slider.addEventListener('input', function () {
@@ -315,7 +431,7 @@
     if (!refs || !inspector.pumpId) return;
 
     var pump = game.pumps[inspector.pumpId];
-    var showStarving = pump.starving && pump.starveTimer > CFG.starveVisualDelay;
+    var showStarving = pump.starving && pump.starveTimer > level.config.starveVisualDelay;
 
     setText(refs.state, showStarving ? 'Starving' : pump.on ? 'Pumping' : 'Off');
     refs.state.className = 'inspector-state' + (showStarving ? ' is-starving' : pump.on ? ' is-on' : '');
@@ -333,9 +449,9 @@
 
   function render(realDt) {
     var failure = game.failure;
-    var over = game.isOver();
+    var puzzle = level.mode === 'puzzle';
 
-    LEVEL.vats.forEach(function (def) {
+    level.vats.forEach(function (def) {
       var node = nodes.vats[def.id];
       var vat = game.vats[def.id];
       var frac = Math.max(0, Math.min(1, vat.level / vat.capacity));
@@ -343,7 +459,8 @@
 
       setAttr(node.fill, 'y', (def.y + def.h - 2 - height).toFixed(2));
       setAttr(node.fill, 'height', height.toFixed(2));
-      setClass(node.fill, 'vat-fill' + (!vat.reservoir && frac >= CFG.warnFraction ? ' is-warn' : ''));
+      setClass(node.fill, 'vat-fill'
+        + (!vat.reservoir && frac >= level.config.warnFraction ? ' is-warn' : ''));
 
       var failedHere = failure && failure.targetId === def.id;
       setClass(node.body, 'vat-body' + (failedHere ? ' is-failed' : ''));
@@ -353,10 +470,10 @@
         : vat.level.toFixed(1) + ' / ' + vat.capacity);
     });
 
-    LEVEL.pumps.forEach(function (def) {
+    level.pumps.forEach(function (def) {
       var node = nodes.pumps[def.id];
       var pump = game.pumps[def.id];
-      var showStarving = pump.starving && pump.starveTimer > CFG.starveVisualDelay;
+      var showStarving = pump.starving && pump.starveTimer > level.config.starveVisualDelay;
       var failedHere = failure && failure.targetId === def.id;
       var flowing = pump.on && pump.flow > 1e-6;
 
@@ -364,9 +481,11 @@
         + (pump.on ? ' is-on' : '')
         + (showStarving ? ' is-starving' : '')
         + (failedHere ? ' is-failed' : '')
-        + (selectedId === def.id ? ' is-selected' : ''));
+        + (!puzzle && selectedId === def.id ? ' is-selected' : ''));
 
-      setText(node.rateText, pump.rate.toFixed(1));
+      setText(node.glyph, showStarving ? GLYPH.starving : pump.on ? GLYPH.on : GLYPH.off);
+      if (node.rateText) setText(node.rateText, pump.rate.toFixed(1));
+
       setClass(node.flow, 'pipe-flow'
         + (flowing ? ' is-flowing' : '')
         + (showStarving ? ' is-starving' : ''));
@@ -376,8 +495,8 @@
         setAttr(node.flow, 'stroke-dashoffset', node.dash.toFixed(1));
       }
 
-      var aria = def.id + ', ' + def.description + ', '
-        + (pump.on ? 'on' : 'off') + ', rate ' + pump.rate.toFixed(1) + ' gallons per second';
+      var aria = def.id + ', ' + def.description + ', ' + def.rate + ' gallons per second, '
+        + (showStarving ? 'starving' : pump.on ? 'on' : 'off');
       if (node.group.__aria !== aria) {
         node.group.__aria = aria;
         node.group.setAttribute('aria-label', aria);
@@ -395,32 +514,39 @@
     });
 
     var progress = game.progress();
-    var progressPct = Math.floor(progress * 100);
-    document.getElementById('hud-progress-fill').style.width = (progress * 100).toFixed(2) + '%';
-    setText(document.getElementById('hud-progress-label'), progressPct + '%');
-    document.getElementById('hud-progress').setAttribute('aria-valuenow', String(progressPct));
-    setText(document.getElementById('hud-time'), fmtTime(game.elapsed));
-    setText(document.getElementById('hud-inflow'), fmtRate(game.totalInflow()));
-    setText(document.getElementById('hud-outflow'), fmtRate(game.reservoirInflow()));
+    var pct = Math.floor(progress * 100);
+    $('hud-progress-fill').style.width = (progress * 100).toFixed(2) + '%';
+    setText($('hud-progress-label'), pct + '%');
+    $('hud-progress').setAttribute('aria-valuenow', String(pct));
+    setText($('hud-time'), fmtTime(game.elapsed)
+      + (level.timeLimit ? ' / ' + fmtTime(level.timeLimit) : ''));
 
-    var statusNode = document.getElementById('hud-status');
-    var statusText = { IDLE: 'Ready', RUNNING: 'Running', PAUSED: 'Paused', WON: 'Complete', LOST: 'Failed' };
+    if (puzzle) {
+      setText($('hud-moves'), game.moves + ' / ' + (spec.par || '?'));
+    } else {
+      setText($('hud-outflow'), fmtRate(game.reservoirInflow()));
+      setText($('hud-inflow'), fmtRate(game.totalInflow()));
+    }
+
+    var statusNode = $('hud-status');
+    var statusText = { IDLE: 'Ready', RUNNING: 'Running', PAUSED: 'Paused', WON: 'Solved', LOST: 'Failed' };
     setText(statusNode, statusText[game.status]);
     statusNode.className = 'hud-value'
       + (game.status === 'WON' ? ' is-won' : game.status === 'LOST' ? ' is-lost'
         : game.status === 'RUNNING' ? ' is-running' : '');
 
-    var startBtn = document.getElementById('btn-start');
+    var startBtn = $('btn-start');
     setText(startBtn, game.status === 'RUNNING' ? 'Pause' : game.status === 'PAUSED' ? 'Resume' : 'Start');
-    startBtn.disabled = over;
+    startBtn.disabled = game.isOver();
 
-    renderInspector();
+    if (!puzzle) renderInspector();
   }
 
   // ------------------------------------------------------------ frame loop
 
   function frame(ts) {
     window.requestAnimationFrame(frame);
+    if (!running || !game) { lastTs = ts; return; }
 
     if (lastTs === 0) lastTs = ts;
     var realDt = (ts - lastTs) / 1000;
@@ -431,12 +557,13 @@
     if (game.status === 'RUNNING') {
       acc += realDt;
       var steps = 0;
-      while (acc >= SIM_DT && steps < MAX_STEPS_PER_FRAME && game.status === 'RUNNING') {
-        game.step(SIM_DT);
-        acc -= SIM_DT;
+      var simDt = 1 / level.config.simHz;
+      while (acc >= simDt && steps < MAX_STEPS_PER_FRAME && game.status === 'RUNNING') {
+        game.step(simDt);
+        acc -= simDt;
         steps++;
       }
-      if (acc > SIM_DT * MAX_STEPS_PER_FRAME) acc = 0;
+      if (acc > simDt * MAX_STEPS_PER_FRAME) acc = 0;
       if (game.isOver()) showResult();
     }
 
@@ -445,48 +572,49 @@
 
   // ----------------------------------------------------------------- modal
 
-  var modal = document.getElementById('modal');
-
   function openModal(title, buildBody, actions) {
-    document.getElementById('modal-title').textContent = title;
-    var body = document.getElementById('modal-body');
+    $('modal-title').textContent = title;
+    var body = $('modal-body');
     body.textContent = '';
     buildBody(body);
 
-    var actionHost = document.getElementById('modal-actions');
-    actionHost.textContent = '';
-    actions.forEach(function (spec) {
-      var button = el('button', 'btn' + (spec.primary ? ' btn-primary' : ''), spec.label);
+    var host = $('modal-actions');
+    host.textContent = '';
+    actions.forEach(function (action) {
+      var button = el('button', 'btn' + (action.primary ? ' btn-primary' : ''), action.label);
       button.type = 'button';
-      button.addEventListener('click', spec.onClick);
-      actionHost.appendChild(button);
+      button.addEventListener('click', action.onClick);
+      host.appendChild(button);
     });
 
-    modal.hidden = false;
-    var first = actionHost.querySelector('button');
+    $('modal').hidden = false;
+    var first = host.querySelector('button');
     if (first) first.focus();
   }
 
-  function closeModal() { modal.hidden = true; }
+  function closeModal() { $('modal').hidden = true; }
 
   function showHelp() {
-    var wasRunning = game.status === 'RUNNING';
+    var wasRunning = game && game.status === 'RUNNING';
     if (wasRunning) game.pause();
+    var puzzle = level.mode === 'puzzle';
 
     openModal('How to Play', function (body) {
-      body.appendChild(el('p', null,
-        'Three inlets feed vats 1, 2 and 3. Twenty-three pumps move water down and across the grid. ' +
-        'Fill Vat 10 to 100% to finish the level.'));
+      body.appendChild(el('p', null, puzzle
+        ? 'Every pipe moves a fixed number of gallons per second, printed beside it. '
+          + 'Your only control is which pumps are running.'
+        : 'Set the inlet and pump rates however you like, then keep the plant balanced.'));
 
       var rules = el('ul');
       [
-        'Open the inlet sliders first — a pump with nothing to draw from will fail.',
-        'Click a pump button to switch it on or off. Shift-click selects it without toggling.',
-        'Tune the selected pump with the inspector slider, the scroll wheel over its button, or the arrow keys.',
-        'Vats 1–9 hold 100 gallons. Let one hit 100% and the run ends.',
-        'A pump that cannot draw its full rate pulses amber. You have ' + CFG.dryGrace.toFixed(0) +
-          ' seconds to feed it before it runs dry and the run ends.',
-        'A stable plant is one where every vat’s inflow matches its outflow.'
+        'Fill the reservoir at the bottom to 100% to finish.',
+        'A vat that reaches its capacity overflows and the run ends.',
+        'A pump that cannot draw its full rate pulses amber. Feed it or switch it off '
+          + 'within ' + level.config.dryGrace.toFixed(0) + ' seconds or it runs dry.',
+        'A vat is stable when what flows in equals what flows out.',
+        puzzle
+          ? 'You can pause at any time and keep flipping switches — this is a puzzle, not a reflex test.'
+          : 'Click a pump to toggle it; shift-click selects without toggling.'
       ].forEach(function (text) { rules.appendChild(el('li', null, text)); });
       body.appendChild(rules);
 
@@ -495,16 +623,8 @@
       kbd.appendChild(el('kbd', null, 'Tab'));
       kbd.appendChild(document.createTextNode(' to a pump, '));
       kbd.appendChild(el('kbd', null, 'Space'));
-      kbd.appendChild(document.createTextNode(' to toggle, '));
-      kbd.appendChild(el('kbd', null, '↑'));
-      kbd.appendChild(document.createTextNode(' / '));
-      kbd.appendChild(el('kbd', null, '↓'));
-      kbd.appendChild(document.createTextNode(' to change its rate.'));
+      kbd.appendChild(document.createTextNode(' to toggle.'));
       body.appendChild(kbd);
-
-      body.appendChild(el('p', null,
-        'Stuck? Set all three inlets to 10 gal/s, then bring on P1–P3, P4–P6 and P7–P9 at 10 gal/s each, ' +
-        'roughly five seconds apart.'));
     }, [
       { label: wasRunning ? 'Resume' : 'Close', primary: true, onClick: function () {
         closeModal();
@@ -513,85 +633,149 @@
     ]);
   }
 
-  function failureExplanation(failure) {
+  function failureText(failure) {
     if (!failure) return '';
     if (failure.kind === 'OVERFLOW') {
-      return failure.label + ' overflowed. It reached 100% while still taking on more water than it '
-        + 'was sending out.';
+      return failure.label + ' overflowed — it reached capacity while still taking on '
+        + 'more water than it was sending out.';
+    }
+    if (failure.kind === 'TIMEOUT') {
+      return 'Time ran out. The reservoir needed to be full within '
+        + level.timeLimit + ' seconds.';
     }
     var pump = game.pumps[failure.targetId];
-    return pump.id + ' ran dry. Its source could not supply the ' + fmtRate(pump.rate)
-      + ' it was asking for (' + pump.description + ') for more than ' + CFG.dryGrace.toFixed(0)
-      + ' seconds.';
+    return pump.id + ' ran dry — its source could not supply the ' + fmtRate(pump.rate)
+      + ' it was asking for (' + pump.description + ').';
+  }
+
+  function shareText() {
+    var par = spec.par || 0;
+    var delta = game.moves - par;
+    var verdict = delta <= 0 ? 'under par' : delta === 1 ? '1 over par' : delta + ' over par';
+    return 'Water Works Daily #' + spec.dayNumber + '\n'
+      + game.moves + ' switches (par ' + par + ') — ' + verdict + '\n'
+      + fmtTime(game.elapsed);
   }
 
   function showResult() {
+    running = false;
     var won = game.status === 'WON';
-    var best = null;
+    var puzzle = level.mode === 'puzzle';
+    var improved = won ? recordWin(progressKeyFor(spec), game.moves, game.elapsed) : false;
 
-    if (won) {
-      var previous = readBestTime();
-      if (previous === null || game.elapsed < previous) {
-        writeBestTime(game.elapsed);
-        best = 'New best time.';
-      } else {
-        best = 'Best time: ' + fmtTime(previous) + '.';
-      }
+    var actions = [{ label: 'Levels', onClick: function () { closeModal(); showSelect(); } }];
+    if (won && puzzle && spec.daily && navigator.clipboard) {
+      actions.push({ label: 'Copy result', onClick: function (event) {
+        navigator.clipboard.writeText(shareText());
+        event.target.textContent = 'Copied';
+      } });
     }
+    actions.push({ label: won ? 'Play again' : 'Retry', primary: true, onClick: function () {
+      closeModal();
+      restart();
+    } });
 
-    openModal(won ? 'Level Complete' : 'Run Failed', function (body) {
-      var headline = el('p', 'result-headline ' + (won ? 'is-won' : 'is-lost'),
-        won ? 'Vat 10 filled in ' + fmtTime(game.elapsed) : failureExplanation(game.failure));
-      body.appendChild(headline);
+    openModal(won ? 'Reservoir Full' : 'Run Failed', function (body) {
+      body.appendChild(el('p', 'result-headline ' + (won ? 'is-won' : 'is-lost'),
+        won ? 'Filled in ' + fmtTime(game.elapsed) : failureText(game.failure)));
 
-      if (won && best) body.appendChild(el('p', null, best));
-      if (!won) {
-        body.appendChild(el('p', null, 'Vat 10 reached ' + Math.floor(game.progress() * 100)
-          + '% after ' + fmtTime(game.elapsed) + '.'));
+      if (won && puzzle) {
+        var par = spec.par || 0;
+        var delta = game.moves - par;
+        body.appendChild(el('p', null, game.moves + ' switches against a par of ' + par
+          + (delta < 0 ? ' — under par.' : delta === 0 ? ' — exactly par.' : '.')));
+        if (improved) body.appendChild(el('p', null, 'That’s your best on this level.'));
       }
-    }, [
-      { label: 'Close', onClick: closeModal },
-      { label: 'New Game', primary: true, onClick: function () { closeModal(); newGame(); } }
-    ]);
+
+      if (!won) {
+        body.appendChild(el('p', null, 'The reservoir reached '
+          + Math.floor(game.progress() * 100) + '% after ' + fmtTime(game.elapsed) + '.'));
+      }
+    }, actions);
   }
 
   // --------------------------------------------------------------- actions
 
-  function newGame() {
+  function restart() {
     game.reset();
     acc = 0;
+    lastTs = 0;
     selectedId = null;
-    buildInletControls();
-    buildInspector();
+    if (level.mode === 'sandbox') {
+      buildInletControls();
+      buildInspector();
+    }
     closeModal();
+    render(0);
+  }
+
+  function startLevel(chosenSpec) {
+    spec = chosenSpec;
+    level = W.buildLevel(spec);
+    game = W.createGame(level);
+
+    var puzzle = level.mode === 'puzzle';
+    $('screen-select').hidden = true;
+    $('screen-play').hidden = false;
+    $('level-name').textContent = level.name;
+    $('level-blurb').textContent = level.blurb || '';
+    $('panel-inlets').hidden = puzzle;
+    $('panel-inspector').hidden = puzzle;
+    $('layout').classList.toggle('is-solo', puzzle);
+    $('hud-moves-item').hidden = !puzzle;
+    $('hud-outflow-item').hidden = puzzle;
+    $('stage-hint').textContent = puzzle
+      ? 'Numbers beside each pipe are gallons per second. Pause any time — switches still work.'
+      : '';
+
+    buildScene();
+    if (!puzzle) {
+      buildInletControls();
+      buildInspector();
+    }
+
+    acc = 0;
+    lastTs = 0;
+    running = true;
+    closeModal();
+    render(0);
+
+    if (window.history.replaceState && !spec.daily) {
+      window.history.replaceState(null, '', '?level=' + spec.id);
+    }
   }
 
   function toggleRun() {
-    if (game.status === 'RUNNING') game.pause();
-    else game.start();
+    if (game.status === 'RUNNING') game.pause(); else game.start();
   }
 
-  document.getElementById('btn-new').addEventListener('click', newGame);
-  document.getElementById('btn-start').addEventListener('click', toggleRun);
-  document.getElementById('btn-help').addEventListener('click', showHelp);
+  // ------------------------------------------------------------------ boot
 
-  modal.addEventListener('click', function (event) {
-    if (event.target === modal) closeModal();
+  $('btn-back').addEventListener('click', showSelect);
+  $('btn-start').addEventListener('click', toggleRun);
+  $('btn-restart').addEventListener('click', restart);
+  $('btn-help').addEventListener('click', showHelp);
+
+  $('modal').addEventListener('click', function (event) {
+    if (event.target === $('modal')) closeModal();
   });
 
   document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && !modal.hidden) closeModal();
+    if (event.key === 'Escape' && !$('modal').hidden) closeModal();
   });
 
-  // Losing a run because the tab was in the background would not be fair.
+  // Losing a run because the tab went to the background would not be fair.
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden && game.status === 'RUNNING') game.pause();
+    if (document.hidden && game && game.status === 'RUNNING') game.pause();
   });
 
-  document.getElementById('level-name').textContent = LEVEL.name;
+  buildSelect();
 
-  buildScene();
-  buildInletControls();
-  buildInspector();
+  var requested = /[?&]level=([\w-]+)/.exec(location.search);
+  if (requested) {
+    var found = W.specById(requested[1]);
+    if (found) startLevel(found);
+  }
+
   window.requestAnimationFrame(frame);
 })();
