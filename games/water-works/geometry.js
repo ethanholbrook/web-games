@@ -52,6 +52,8 @@
   var BUTTON_W = 54;
   var BUTTON_H = 30;
   var DIAGONAL_T = 0.28;      // keeps crossing pairs clear of one another
+  var PARALLEL_GAP = 84;      // spacing between pipes joining the same two vats
+  var LABEL_OFFSET = 42;      // how far a rate badge sits off its pipe
 
   var INLET_NAMES = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -63,7 +65,12 @@
     return dst.col === src.col ? 'vertical' : 'diagonal';
   }
 
-  function geometryFor(kind, src, dst) {
+  /**
+   * `slot` and `slots` spread pumps that share the same pair of vats sideways,
+   * so two parallel pipes are drawn as two pipes rather than one on top of
+   * another. A single pump is always centred.
+   */
+  function geometryFor(kind, src, dst, slot, slots) {
     var a, b, dir;
 
     if (kind === 'vertical') {
@@ -83,6 +90,25 @@
       b = { x: dst.cx - dir * PORT_DX, y: dst.top };
     }
 
+    // Shift parallel runs apart along the pipe's own perpendicular.
+    var labelDX = kind === 'lateral' ? 0 : LABEL_OFFSET;
+    var labelDY = kind === 'lateral' ? -LABEL_OFFSET / 2 : 0;
+
+    if (slots > 1) {
+      var dx = b.x - a.x;
+      var dy = b.y - a.y;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var shift = (slot - (slots - 1) / 2) * PARALLEL_GAP;
+      var nx = -dy / len * shift;
+      var ny = dx / len * shift;
+      a = { x: a.x + nx, y: a.y + ny };
+      b = { x: b.x + nx, y: b.y + ny };
+      // Labels go outwards from the bundle, or they land on the next pipe over.
+      var away = Math.sqrt(nx * nx + ny * ny) || 1;
+      labelDX = nx / away * LABEL_OFFSET;
+      labelDY = ny / away * LABEL_OFFSET;
+    }
+
     var t = kind === 'diagonal' ? DIAGONAL_T : 0.5;
     return {
       path: 'M ' + a.x + ' ' + a.y + ' L ' + b.x + ' ' + b.y,
@@ -90,8 +116,8 @@
       buttonX: lerp(a.x, b.x, t),
       buttonY: lerp(a.y, b.y, t),
       // Perpendicular offset for the rate label so it never sits on the pipe.
-      labelX: lerp(a.x, b.x, t) + (kind === 'lateral' ? 0 : 40),
-      labelY: lerp(a.y, b.y, t) + (kind === 'lateral' ? -22 : 0)
+      labelX: lerp(a.x, b.x, t) + labelDX,
+      labelY: lerp(a.y, b.y, t) + labelDY
     };
   }
 
@@ -155,14 +181,25 @@
     var vatById = {};
     vats.forEach(function (v) { vatById[v.id] = v; });
 
+    // Count pipes per vat pair up front so parallel runs can be fanned out.
+    var pairCount = {};
+    var pairSeen = {};
+    spec.pumps.forEach(function (p) {
+      var key = p.src + '>' + p.dst;
+      pairCount[key] = (pairCount[key] || 0) + 1;
+    });
+
     var pumps = spec.pumps.map(function (p) {
       var src = vatById[p.src];
       var dst = vatById[p.dst];
       if (!src) throw new Error(p.id + ' draws from unknown vat ' + p.src);
       if (!dst) throw new Error(p.id + ' feeds unknown vat ' + p.dst);
 
+      var key = p.src + '>' + p.dst;
+      var slot = pairSeen[key] = (pairSeen[key] === undefined ? 0 : pairSeen[key] + 1);
+
       var kind = classify(src, dst, reservoirId);
-      var geom = geometryFor(kind, src, dst);
+      var geom = geometryFor(kind, src, dst, slot, pairCount[key]);
 
       return {
         id: p.id,

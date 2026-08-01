@@ -21,6 +21,22 @@
 
   var GLYPH = { on: '▶', off: '■', starving: '!' };
 
+  // The clock is the score. Targets come from the solver, so gold means matching
+  // roughly the best line anyone has found for the level.
+  var MEDALS = [
+    { id: 'gold', label: 'Gold', mark: '●', factor: 1.15 },
+    { id: 'silver', label: 'Silver', mark: '●', factor: 1.45 },
+    { id: 'bronze', label: 'Bronze', mark: '●', factor: Infinity }
+  ];
+
+  function medalFor(seconds, target) {
+    if (!target) return null;
+    for (var i = 0; i < MEDALS.length; i++) {
+      if (seconds <= target * MEDALS[i].factor) return MEDALS[i];
+    }
+    return MEDALS[MEDALS.length - 1];
+  }
+
   var level = null;
   var game = null;
   var spec = null;
@@ -87,13 +103,26 @@
     catch (err) { /* private mode - progress just won't persist */ }
   }
 
-  function recordWin(levelId, moves, seconds) {
+  function recordWin(levelId, moves, seconds, target) {
     var progress = loadProgress();
     var previous = progress[levelId];
-    if (!previous || moves < previous.moves || (moves === previous.moves && seconds < previous.time)) {
-      progress[levelId] = { moves: moves, time: seconds };
+    var medal = medalFor(seconds, target);
+
+    if (!previous || seconds < previous.time) {
+      progress[levelId] = {
+        time: seconds,
+        moves: moves,
+        medal: medal ? medal.id : null,
+        fewestMoves: previous ? Math.min(previous.fewestMoves || previous.moves, moves) : moves
+      };
       saveProgress(progress);
       return true;
+    }
+
+    // Not a faster run, but it may still be a tidier one.
+    if (moves < (previous.fewestMoves || previous.moves)) {
+      previous.fewestMoves = moves;
+      saveProgress(progress);
     }
     return false;
   }
@@ -115,7 +144,10 @@
 
     var head = el('div', 'card-head');
     head.appendChild(el('h3', null, spec.name));
-    if (meta.best) head.appendChild(el('span', 'card-best', '★ ' + meta.best.moves));
+    if (meta.best) {
+      head.appendChild(el('span', 'card-best medal-' + (meta.best.medal || 'bronze'),
+        '● ' + fmtTime(meta.best.time)));
+    }
     card.appendChild(head);
 
     card.appendChild(el('p', null, spec.blurb || ''));
@@ -124,12 +156,12 @@
     if (spec.mode === 'sandbox') {
       tags.appendChild(el('span', 'tag', 'Free play'));
     } else {
-      tags.appendChild(el('span', 'tag', 'Par ' + spec.par));
+      tags.appendChild(el('span', 'tag', 'Target ' + fmtTime(spec.targetTime)));
       tags.appendChild(el('span', 'tag',
         spec.pumps.length + (spec.pumps.length === 1 ? ' pump' : ' pumps')));
       if (spec.timeLimit) tags.appendChild(el('span', 'tag tag-warn', spec.timeLimit + 's limit'));
     }
-    if (meta.best) tags.appendChild(el('span', 'tag tag-done', 'Solved'));
+    if (meta.best) tags.appendChild(el('span', 'tag tag-done', meta.best.moves + ' switches'));
     card.appendChild(tags);
 
     card.addEventListener('click', function () { startLevel(spec); });
@@ -522,7 +554,8 @@
       + (level.timeLimit ? ' / ' + fmtTime(level.timeLimit) : ''));
 
     if (puzzle) {
-      setText($('hud-moves'), game.moves + ' / ' + (spec.par || '?'));
+      setText($('hud-moves'), String(game.moves));
+      setText($('hud-target'), spec.targetTime ? fmtTime(spec.targetTime) : '—');
     } else {
       setText($('hud-outflow'), fmtRate(game.reservoirInflow()));
       setText($('hud-inflow'), fmtRate(game.totalInflow()));
@@ -607,11 +640,13 @@
 
       var rules = el('ul');
       [
-        'Fill the reservoir at the bottom to 100% to finish.',
+        'Fill the reservoir at the bottom to 100%. The clock is your score — '
+          + 'beat the target time for a medal.',
         'A vat that reaches its capacity overflows and the run ends.',
         'A pump that cannot draw its full rate pulses amber. Feed it or switch it off '
           + 'within ' + level.config.dryGrace.toFixed(0) + ' seconds or it runs dry.',
-        'A vat is stable when what flows in equals what flows out.',
+        'Most levels have no setting you can walk away from: every pipe draws '
+          + 'faster than its supply, so pumps have to be run, rested and run again.',
         puzzle
           ? 'You can pause at any time and keep flipping switches — this is a puzzle, not a reflex test.'
           : 'Click a pump to toggle it; shift-click selects without toggling.'
@@ -649,19 +684,21 @@
   }
 
   function shareText() {
-    var par = spec.par || 0;
-    var delta = game.moves - par;
-    var verdict = delta <= 0 ? 'under par' : delta === 1 ? '1 over par' : delta + ' over par';
+    var medal = medalFor(game.elapsed, spec.targetTime);
     return 'Water Works Daily #' + spec.dayNumber + '\n'
-      + game.moves + ' switches (par ' + par + ') — ' + verdict + '\n'
-      + fmtTime(game.elapsed);
+      + fmtTime(game.elapsed) + (medal ? '  ' + medal.mark + ' ' + medal.label : '')
+      + '  (target ' + fmtTime(spec.targetTime) + ')\n'
+      + game.moves + ' switches';
   }
 
   function showResult() {
     running = false;
     var won = game.status === 'WON';
     var puzzle = level.mode === 'puzzle';
-    var improved = won ? recordWin(progressKeyFor(spec), game.moves, game.elapsed) : false;
+    var improved = won
+      ? recordWin(progressKeyFor(spec), game.moves, game.elapsed, spec.targetTime)
+      : false;
+    var medal = won && puzzle ? medalFor(game.elapsed, spec.targetTime) : null;
 
     var actions = [{ label: 'Levels', onClick: function () { closeModal(); showSelect(); } }];
     if (won && puzzle && spec.daily && navigator.clipboard) {
@@ -679,12 +716,23 @@
       body.appendChild(el('p', 'result-headline ' + (won ? 'is-won' : 'is-lost'),
         won ? 'Filled in ' + fmtTime(game.elapsed) : failureText(game.failure)));
 
+      if (medal) {
+        var banner = el('p', 'medal-banner medal-' + medal.id);
+        banner.appendChild(el('span', 'medal-mark', medal.mark));
+        banner.appendChild(document.createTextNode(' ' + medal.label
+          + ' — target is ' + fmtTime(spec.targetTime)));
+        body.appendChild(banner);
+
+        var next = MEDALS[MEDALS.indexOf(medal) - 1];
+        if (next) {
+          body.appendChild(el('p', null, 'Finish in '
+            + fmtTime(spec.targetTime * next.factor) + ' for ' + next.label + '.'));
+        }
+      }
+
       if (won && puzzle) {
-        var par = spec.par || 0;
-        var delta = game.moves - par;
-        body.appendChild(el('p', null, game.moves + ' switches against a par of ' + par
-          + (delta < 0 ? ' — under par.' : delta === 0 ? ' — exactly par.' : '.')));
-        if (improved) body.appendChild(el('p', null, 'That’s your best on this level.'));
+        body.appendChild(el('p', null, 'Took ' + game.moves + ' switches.'));
+        if (improved) body.appendChild(el('p', null, 'That’s your best time on this level.'));
       }
 
       if (!won) {
@@ -700,6 +748,9 @@
     game.reset();
     acc = 0;
     lastTs = 0;
+    // showResult() parks the frame loop when a run ends; without this the
+    // restarted level sits at Ready and Start appears to do nothing.
+    running = true;
     selectedId = null;
     if (level.mode === 'sandbox') {
       buildInletControls();
@@ -723,6 +774,7 @@
     $('panel-inspector').hidden = puzzle;
     $('layout').classList.toggle('is-solo', puzzle);
     $('hud-moves-item').hidden = !puzzle;
+    $('hud-target-item').hidden = !puzzle;
     $('hud-outflow-item').hidden = puzzle;
     $('stage-hint').textContent = puzzle
       ? 'Numbers beside each pipe are gallons per second. Pause any time — switches still work.'

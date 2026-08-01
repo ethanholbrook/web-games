@@ -1,13 +1,15 @@
 /*
  * Water Works - level definitions.
  *
- * Pure data. Geometry is derived by geometry.js, and every puzzle level's `par`
+ * Pure data. Geometry is derived by geometry.js, and every level's targetTime
  * is checked against the solver by tests/levels.test.js, so a level that is not
- * actually winnable cannot ship.
+ * winnable - or whose target is not achievable - cannot ship.
  *
  * Puzzle levels have fixed rates on every pipe and are played entirely with the
- * pump switches. Sandbox is the original free-play plant, where the rates are
- * yours to set.
+ * pump switches; the score is the clock. From l4 onwards none of them has a
+ * steady state: every route to the reservoir outruns its own supply, so pumps
+ * have to be cycled rather than set once and left. tests/levels.test.js enforces
+ * that. Sandbox is the original free-play plant, where the rates are yours.
  */
 (function (root) {
   'use strict';
@@ -31,7 +33,7 @@
   var CAMPAIGN = [
     {
       id: 'l1',
-      par: 1,
+      targetTime: 10.5,
       name: 'First Draw',
       blurb: 'Water is already arriving. Send it on.',
       cols: 1, rows: 1,
@@ -43,7 +45,7 @@
 
     {
       id: 'l2',
-      par: 2,
+      targetTime: 15.5,
       name: 'Downstream',
       blurb: 'A pump with nothing to draw from runs dry. Mind the order.',
       cols: 1, rows: 2,
@@ -55,123 +57,126 @@
 
     {
       id: 'l3',
-      par: 5,
-      name: 'Even Split',
-      blurb: 'Six in means six out. Anything less and the vat fills up.',
-      cols: 2, rows: 2,
-      vats: [vat('V1', 0, 0, 40), vat('V2', 1, 0, 40), vat('V3', 0, 1, 40), vat('V4', 1, 1, 40)],
-      reservoir: { capacity: 300 },
-      inlets: [inlet('V1', 6)],
-      pumps: [
-        pump('P1', 'V1', 'V3', 4), pump('P2', 'V1', 'V2', 2),
-        pump('P3', 'V3', 'R', 4), pump('P4', 'V2', 'V4', 2), pump('P5', 'V4', 'R', 2)
-      ]
+      targetTime: 17,
+      name: 'Overdraw',
+      blurb: 'This pump wants three times what the inlet delivers. Let the vat fill first.',
+      cols: 1, rows: 1,
+      vats: [vat('V1', 0, 0, 40)],
+      reservoir: { capacity: 50 },
+      inlets: [inlet('V1', 3)],
+      pumps: [pump('P1', 'V1', 'R', 9)]
     },
 
     {
       id: 'l4',
-      par: 2,
-      name: 'The Decoy',
-      blurb: 'Not every pump belongs on. One route here is a trap.',
-      cols: 2, rows: 2,
-      vats: [vat('V1', 0, 0, 40), vat('V2', 1, 0, 40), vat('V3', 0, 1, 40), vat('V4', 1, 1, 40)],
-      reservoir: { capacity: 300 },
-      inlets: [inlet('V1', 6)],
-      pumps: [
-        pump('P1', 'V1', 'V3', 6), pump('P2', 'V1', 'V2', 3),
-        pump('P3', 'V3', 'R', 6), pump('P4', 'V2', 'V4', 3), pump('P5', 'V4', 'R', 3)
-      ]
+      targetTime: 51,
+      name: 'Duty Cycle',
+      blurb: 'One tankful is not enough. Run it, refill it, run it again.',
+      cols: 1, rows: 1,
+      vats: [vat('V1', 0, 0, 40)],
+      reservoir: { capacity: 150 },
+      inlets: [inlet('V1', 3)],
+      pumps: [pump('P1', 'V1', 'R', 9)]
     },
 
     {
       id: 'l5',
-      par: 1,
-      name: 'Reserve',
-      blurb: 'This pump wants more than the inlet delivers. Let the vat fill first.',
+      targetTime: 34,
+      name: 'Trickle and Surge',
+      blurb: 'The steady pump alone will overfill the vat. Dump the surplus.',
       cols: 1, rows: 1,
-      vats: [vat('V1', 0, 0, 60)],
-      reservoir: { capacity: 40 },
-      inlets: [inlet('V1', 2)],
-      pumps: [pump('P1', 'V1', 'R', 8)]
+      vats: [vat('V1', 0, 0, 50)],
+      reservoir: { capacity: 200 },
+      inlets: [inlet('V1', 6)],
+      pumps: [pump('P1', 'V1', 'R', 4), pump('P2', 'V1', 'R', 10)]
     },
 
     {
       id: 'l6',
-      par: 7,
-      name: 'Crossfeed',
-      blurb: 'The middle vat has no inlet of its own. Feed it sideways.',
-      cols: 3, rows: 2,
-      vats: [
-        vat('V1', 0, 0, 40), vat('V2', 1, 0, 40), vat('V3', 2, 0, 40),
-        vat('V4', 0, 1, 40), vat('V5', 1, 1, 40), vat('V6', 2, 1, 40)
-      ],
-      reservoir: { capacity: 400 },
-      inlets: [inlet('V1', 7), inlet('V3', 5)],
-      pumps: [
-        pump('P1', 'V1', 'V4', 4), pump('P2', 'V1', 'V2', 3),
-        pump('P3', 'V2', 'V5', 3), pump('P4', 'V3', 'V6', 5),
-        pump('P5', 'V4', 'R', 4), pump('P6', 'V5', 'R', 3), pump('P7', 'V6', 'R', 5)
-      ]
+      targetTime: 34.5,
+      name: 'Two Stages',
+      blurb: 'Both pumps outrun their supply. Now they have to take turns.',
+      cols: 1, rows: 2,
+      vats: [vat('V1', 0, 0, 40), vat('V2', 0, 1, 30)],
+      reservoir: { capacity: 150 },
+      inlets: [inlet('V1', 5)],
+      pumps: [pump('P1', 'V1', 'V2', 12), pump('P2', 'V2', 'R', 12)]
     },
 
     {
       id: 'l7',
-      par: 8,
-      name: 'Uneven Supply',
-      blurb: 'One column gets far more than it can carry. Share the load.',
-      cols: 3, rows: 2,
-      vats: [
-        vat('V1', 0, 0, 50), vat('V2', 1, 0, 50), vat('V3', 2, 0, 50),
-        vat('V4', 0, 1, 50), vat('V5', 1, 1, 50), vat('V6', 2, 1, 50)
-      ],
-      reservoir: { capacity: 420 },
-      inlets: [inlet('V1', 10), inlet('V3', 2)],
+      targetTime: 41.5,
+      name: 'Split Cycle',
+      blurb: 'One branch you can leave running. The other you cannot.',
+      cols: 2, rows: 2,
+      vats: [vat('V1', 0, 0, 50), vat('V2', 1, 0, 40), vat('V3', 0, 1, 40), vat('V4', 1, 1, 40)],
+      reservoir: { capacity: 280 },
+      inlets: [inlet('V1', 8)],
       pumps: [
-        pump('P1', 'V1', 'V4', 4), pump('P2', 'V1', 'V2', 6),
-        pump('P3', 'V2', 'V5', 4), pump('P4', 'V2', 'V3', 2),
-        pump('P5', 'V3', 'V6', 4), pump('P6', 'V1', 'V5', 3),
-        pump('P7', 'V4', 'R', 4), pump('P8', 'V5', 'R', 4), pump('P9', 'V6', 'R', 4)
+        pump('P1', 'V1', 'V3', 12), pump('P2', 'V1', 'V2', 5),
+        pump('P3', 'V3', 'R', 12), pump('P4', 'V2', 'V4', 5), pump('P5', 'V4', 'R', 5)
       ]
     },
 
     {
       id: 'l8',
-      par: 10,
-      name: 'Full Plant',
-      blurb: 'Three rows, two feeds, and only one set of switches that balances.',
-      cols: 3, rows: 3,
+      targetTime: 36.5,
+      name: 'Crossfeed',
+      blurb: 'The middle column has no inlet of its own. Feed it sideways, and keep it moving.',
+      cols: 3, rows: 2,
       vats: [
-        vat('V1', 0, 0, 40), vat('V2', 1, 0, 40), vat('V3', 2, 0, 40),
-        vat('V4', 0, 1, 40), vat('V5', 1, 1, 40), vat('V6', 2, 1, 40),
-        vat('V7', 0, 2, 40), vat('V8', 1, 2, 40), vat('V9', 2, 2, 40)
+        vat('V1', 0, 0, 45), vat('V2', 1, 0, 45), vat('V3', 2, 0, 45),
+        vat('V4', 0, 1, 45), vat('V5', 1, 1, 45), vat('V6', 2, 1, 45)
       ],
-      reservoir: { capacity: 480 },
-      inlets: [inlet('V1', 8), inlet('V3', 4)],
+      reservoir: { capacity: 360 },
+      inlets: [inlet('V1', 7), inlet('V3', 5)],
       pumps: [
-        pump('P1', 'V1', 'V4', 5), pump('P2', 'V1', 'V2', 3),
-        pump('P3', 'V2', 'V5', 3), pump('P4', 'V3', 'V6', 4),
-        pump('P5', 'V4', 'V7', 5), pump('P6', 'V5', 'V8', 3), pump('P7', 'V6', 'V9', 4),
-        pump('P8', 'V7', 'R', 5), pump('P9', 'V8', 'R', 3), pump('P10', 'V9', 'R', 4)
+        pump('P1', 'V1', 'V4', 10), pump('P2', 'V1', 'V2', 4),
+        pump('P3', 'V2', 'V5', 9), pump('P4', 'V3', 'V6', 10),
+        pump('P5', 'V3', 'V2', 3),
+        pump('P6', 'V4', 'R', 10), pump('P7', 'V5', 'R', 9), pump('P8', 'V6', 'R', 10)
       ]
     },
 
     {
       id: 'l9',
-      par: 6,
-      name: 'Against the Clock',
-      blurb: 'The steady route is too slow. Find the one that moves more water.',
-      cols: 3, rows: 2,
-      timeLimit: 70,
+      targetTime: 47,
+      name: 'Full Plant',
+      blurb: 'Three rows, nothing you can leave alone. Keep every stage turning over.',
+      cols: 3, rows: 3,
       vats: [
-        vat('V1', 0, 0, 60), vat('V2', 1, 0, 60), vat('V3', 2, 0, 60),
-        vat('V4', 0, 1, 60), vat('V5', 1, 1, 60), vat('V6', 2, 1, 60)
+        vat('V1', 0, 0, 45), vat('V2', 1, 0, 45), vat('V3', 2, 0, 45),
+        vat('V4', 0, 1, 45), vat('V5', 1, 1, 45), vat('V6', 2, 1, 45),
+        vat('V7', 0, 2, 45), vat('V8', 1, 2, 45), vat('V9', 2, 2, 45)
+      ],
+      reservoir: { capacity: 420 },
+      inlets: [inlet('V1', 6), inlet('V3', 6)],
+      pumps: [
+        pump('P1', 'V1', 'V4', 10), pump('P2', 'V1', 'V2', 4),
+        pump('P3', 'V2', 'V5', 9), pump('P4', 'V3', 'V6', 10),
+        pump('P5', 'V3', 'V2', 4),
+        pump('P6', 'V4', 'V7', 10), pump('P7', 'V5', 'V8', 9), pump('P8', 'V6', 'V9', 10),
+        pump('P9', 'V7', 'R', 10), pump('P10', 'V8', 'R', 9), pump('P11', 'V9', 'R', 10)
+      ]
+    },
+
+    {
+      id: 'l10',
+      targetTime: 43,
+      name: 'Against the Clock',
+      blurb: 'Every drop counts. Waste an inlet and you will not make the deadline.',
+      cols: 3, rows: 2,
+      timeLimit: 75,
+      vats: [
+        vat('V1', 0, 0, 50), vat('V2', 1, 0, 50), vat('V3', 2, 0, 50),
+        vat('V4', 0, 1, 50), vat('V5', 1, 1, 50), vat('V6', 2, 1, 50)
       ],
       reservoir: { capacity: 480 },
-      inlets: [inlet('V1', 6), inlet('V2', 6), inlet('V3', 6)],
+      inlets: [inlet('V1', 5), inlet('V2', 6), inlet('V3', 5)],
       pumps: [
-        pump('P1', 'V1', 'V4', 6), pump('P2', 'V2', 'V5', 6), pump('P3', 'V3', 'V6', 6),
-        pump('P4', 'V1', 'V5', 3), pump('P5', 'V3', 'V5', 3),
-        pump('P6', 'V4', 'R', 6), pump('P7', 'V5', 'R', 8), pump('P8', 'V6', 'R', 6)
+        pump('P1', 'V1', 'V4', 11), pump('P2', 'V2', 'V5', 12), pump('P3', 'V3', 'V6', 11),
+        pump('P4', 'V1', 'V5', 4), pump('P5', 'V3', 'V5', 4),
+        pump('P6', 'V4', 'R', 11), pump('P7', 'V5', 'R', 12), pump('P8', 'V6', 'R', 11)
       ]
     }
   ];

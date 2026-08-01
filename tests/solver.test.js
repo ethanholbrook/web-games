@@ -96,8 +96,8 @@ test('every returned schedule wins when replayed through the engine', function (
     var replay = WaterWorks.verifySchedule(level, result.moves);
     assert(replay.won, 'level ' + i + ' schedule did not win on replay: '
       + (replay.failure ? replay.failure.kind + ' ' + replay.failure.targetId : 'timeout'));
-    assert(replay.moves === result.par, 'level ' + i + ' replay used ' + replay.moves
-      + ' toggles, solver reported par ' + result.par);
+    assert(replay.moves === result.moves.length, 'level ' + i + ' replay used ' + replay.moves
+      + ' toggles but the returned schedule has ' + result.moves.length);
   });
 });
 
@@ -163,7 +163,7 @@ test('wins by draining a buffer when no balanced set exists', function () {
   assert(replay.moves === 1, 'expected a single toggle, got ' + replay.moves);
 });
 
-test('the event search can undercut a balanced par', function () {
+test('the event search can undercut the toggle count', function () {
   // Balanced play needs all four pumps; the run is short enough to win with
   // three, which only the event search finds.
   var level = makeLevel({
@@ -172,8 +172,49 @@ test('the event search can undercut a balanced par', function () {
   });
   var result = WaterWorks.solve(level);
   assert(result.solved, 'expected a solution');
-  assert(result.strategy === 'burst', 'expected burst, got ' + result.strategy);
-  assert(result.par === 3, 'expected par 3, got ' + result.par);
+  assert(result.par === 3, 'expected 3 toggles at fewest, got ' + result.par);
+  assert(result.strategies.some(function (s) {
+    return s.strategy === 'burst' && s.toggles === 3;
+  }), 'expected the event search to find the three-toggle line');
+});
+
+test('the headline solution is the quickest one found', function () {
+  // Time is the score, so whichever strategy finishes soonest is the one
+  // reported - even when another uses fewer toggles.
+  var level = makeLevel({
+    vats: ['V1:40', 'V2:40', 'V3:40'], reservoir: 120, inlets: ['V1@6'],
+    pumps: ['P1:V1>V2@4', 'P2:V1>V3@2', 'P3:V2>R@4', 'P4:V3>R@2']
+  });
+  var result = WaterWorks.solve(level);
+  assert(result.solved, 'expected a solution');
+
+  var quickest = result.strategies.reduce(function (best, s) {
+    return s.time < best.time ? s : best;
+  });
+  assert(Math.abs(result.targetTime - quickest.time) < 1e-6,
+    'targetTime ' + result.targetTime + ' is not the quickest of '
+    + JSON.stringify(result.strategies));
+  assert(result.par <= quickest.toggles,
+    'par should be the fewest toggles across all strategies');
+});
+
+test('cycling is found when nothing can be left running', function () {
+  // The drain wants three times the inlet and the reservoir needs several
+  // tankfuls, so the pump has to be run, rested and run again.
+  var level = makeLevel({
+    vats: ['V1:40'], reservoir: 150, inlets: ['V1@3'], pumps: ['P1:V1>R@9']
+  });
+  var result = WaterWorks.solve(level);
+  assert(result.solved, 'expected a solution');
+  assert(!result.strategies.some(function (s) {
+    return s.strategy === 'balanced' || s.strategy === 'buffered';
+  }), 'this level should have no static answer');
+  assert(result.strategies.some(function (s) { return s.strategy === 'cyclic'; }),
+    'expected the cyclic controller to solve it');
+  assert(result.par >= 3, 'a repeated cycle needs at least three toggles, got ' + result.par);
+
+  var replay = WaterWorks.verifySchedule(level, result.moves);
+  assert(replay.won, 'cycling schedule did not replay');
 });
 
 test('par is the smaller of the two strategies', function () {

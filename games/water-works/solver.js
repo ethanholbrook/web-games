@@ -1,26 +1,32 @@
 /*
  * Water Works - puzzle solver.
  *
- * Finds a winning sequence of pump toggles for a fixed-rate level and reports
- * how few toggles it needed (the level's "par").
+ * Finds a winning sequence of pump toggles for a fixed-rate level. The clock is
+ * the score, so it reports the QUICKEST line it can find - that time becomes the
+ * level's target - along with the fewest toggles it managed, as a bonus stat.
  *
- * TWO KINDS OF SOLUTION, TWO SEARCHES
+ * THREE KINDS OF SOLUTION
  *
- * Almost every level is won by picking a BALANCED SET of pumps - one where no
- * vat is asked for more than it receives - and then switching each pump on as
- * soon as its source has water. The hard part is choosing the set; the timing
- * after that is mechanical. So the primary search enumerates balanced sets
- * directly, walking the vats in topological order so each vat's inflow is
- * already known by the time its outgoing pumps are chosen. Iterative deepening
- * on set size makes the first solution found the smallest one.
+ * A BALANCED SET is a set of pumps where no vat is asked for more than it
+ * receives, switched on once and left alone. That search enumerates sets
+ * directly, walking vats in topological order so each vat's inflow is settled
+ * before its outgoing pumps are chosen, with iterative deepening on set size.
  *
- * The other kind is a BURST: let a vat fill, run a pump faster than its supply
- * for a while, then shut it off before it empties. Bursts can win levels that
- * have no balanced set at all, so a second event-driven search covers them. It
- * walks the timeline of moments where something actually changes - a vat fills,
- * a vat runs low, a vat first has enough to feed a pump - because nothing in
- * between is worth acting on. It is capped low, since bursts are only worth
- * hunting for when they are short.
+ * A BURST lets a vat fill, runs a pump faster than its supply for a while, then
+ * shuts it off before it empties. An event-driven A* covers those, walking the
+ * timeline of moments where something actually changes - a vat fills, a vat runs
+ * low, a vat first has enough to feed a pump - because nothing in between is
+ * worth acting on. It is capped low, since bursts are only worth hunting for
+ * when they are short.
+ *
+ * A CYCLE is that repeated: run, rest, run again. Every pump is put under
+ * two-sided bang-bang control - it needs water behind it AND room in front of it
+ * - and pumps that turn out not to be needed are greedily dropped. This is the
+ * only thing that solves a level with no steady state, which is what the
+ * campaign is built from.
+ *
+ * The first two double as a difficulty check: if either solves a level, that
+ * level can be won by flipping switches once and walking away.
  *
  * SOUND, NOT COMPLETE
  *
@@ -31,7 +37,7 @@
  * REAL ENGINE before being accepted. The engine is the ground truth, so any
  * schedule this module returns genuinely wins.
  *
- * The converse does not hold - a level neither search cracks may still be
+ * The converse does not hold - a level none of the three cracks may still be
  * solvable by hand. That is the safe direction to be wrong in: levels the
  * solver rejects simply never ship.
  */
@@ -51,6 +57,9 @@
     maxSteadyNodes: 400000,
     maxCandidates: 600,    // balanced sets verified per depth
     burstThreshold: 0.85,  // fraction of capacity a burst pump waits for
+    offFraction: 0.06,     // fraction of capacity a cycling pump shuts off at
+    destHigh: 0.88,        // destination fullness at which a pump backs off
+    destLow: 0.70,         // and the level it must drop to before restarting
     maxTime: 180,          // seconds of simulated time
     quantiseLevel: 0.05,
     deadline: undefined,   // absolute Date.now() past which to give up
@@ -246,11 +255,12 @@
    * safety margin. Runs on the real engine, so the returned schedule is already
    * verified rather than merely planned.
    */
-  function playSet(level, pumpIds, opts) {
+  function playSet(level, pumpIds, opts, cyclic) {
     var game = root.WaterWorks.createGame(level);
     var dt = 1 / level.config.simHz;
     var limit = Math.min(opts.maxTime, level.timeLimit || opts.maxTime);
     var pending = pumpIds.slice();
+    var cooling = {};
     var moves = [];
     var minHeadroom = Infinity;
     var minReserve = Infinity;
@@ -268,8 +278,43 @@
       return net - pump.rate < -EPS;
     }
 
-    game.start();
-    while (!game.isOver() && game.elapsed < limit) {
+    /* Bang-bang control for levels with no steady state: run a pump until its
+       source is nearly empty, let the vat refill, run it again. Once a pump has
+       been shut off for want of water it must wait for a full buffer before
+       restarting, which is what stops it chattering at the threshold. */
+    function controlCyclic() {
+      for (var i = 0; i < pumpIds.length; i++) {
+        var pump = game.pumps[pumpIds[i]];
+        var source = game.vats[pump.src];
+        var dest = game.vats[pump.dst];
+        var offLevel = Math.max(opts.margin * 2, source.capacity * opts.offFraction);
+
+        // Two-sided control. A pump needs water behind it AND room in front of
+        // it: shutting off only when the source empties will happily overfill
+        // whatever is downstream.
+        var destFull = !dest.reservoir && dest.level >= dest.capacity * opts.destHigh;
+        var destHasRoom = dest.reservoir || dest.level <= dest.capacity * opts.destLow;
+
+        if (pump.on) {
+          if (source.level <= offLevel || destFull) {
+            game.togglePump(pump.id);
+            moves.push({ t: game.elapsed, pumpId: pump.id, on: false });
+            cooling[pump.id] = source.level <= offLevel;
+          }
+        } else {
+          var threshold = (cooling[pump.id] || wouldStarve(pump))
+            ? source.capacity * opts.burstThreshold
+            : opts.margin;
+          if (source.level >= threshold && destHasRoom) {
+            game.togglePump(pump.id);
+            moves.push({ t: game.elapsed, pumpId: pump.id, on: true });
+            cooling[pump.id] = false;
+          }
+        }
+      }
+    }
+
+    function controlOnce() {
       for (var i = pending.length - 1; i >= 0; i--) {
         var pump = game.pumps[pending[i]];
         var source = game.vats[pump.src];
@@ -285,6 +330,11 @@
           pending.splice(i, 1);
         }
       }
+    }
+
+    game.start();
+    while (!game.isOver() && game.elapsed < limit) {
+      if (cyclic) controlCyclic(); else controlOnce();
 
       game.step(dt);
 
@@ -313,6 +363,44 @@
 
   function expired(opts) {
     return opts.deadline !== undefined && Date.now() > opts.deadline;
+  }
+
+  /** Pumps that lead somewhere useful — feeding a dead end only overflows it. */
+  function usefulPumps(model) {
+    var reaches = new Uint8Array(model.n);
+    var changed = true;
+    while (changed) {
+      changed = false;
+      model.pumps.forEach(function (p) {
+        if (reaches[p.src]) return;
+        if (p.dst === -1 || reaches[p.dst]) { reaches[p.src] = 1; changed = true; }
+      });
+    }
+    return model.pumps
+      .filter(function (p) { return p.dst === -1 || reaches[p.dst]; })
+      .map(function (p) { return p.id; });
+  }
+
+  /**
+   * Levels with no steady state are won by cycling: fill a vat, drain it faster
+   * than it refills, shut off, repeat. Run every useful pump under bang-bang
+   * control, then greedily drop pumps that turn out not to be needed.
+   */
+  function cyclicSolve(level, model, opts) {
+    var candidates = usefulPumps(model);
+    if (!candidates.length) return null;
+    if (!playSet(level, candidates, opts, true).won) return null;
+
+    var kept = candidates.slice();
+    for (var i = candidates.length - 1; i >= 0 && !expired(opts); i--) {
+      if (kept.length <= 1) break;
+      var trial = kept.filter(function (id) { return id !== candidates[i]; });
+      if (!trial.length) continue;
+      if (playSet(level, trial, opts, true).won) kept = trial;
+    }
+
+    var final = playSet(level, kept, opts, true);
+    return final.won ? final : null;
   }
 
   function balancedSolve(level, model, opts, allowance) {
@@ -606,64 +694,95 @@
       attemptOpts.margin = margins[m];
 
       var model = buildModel(level, attemptOpts);
-      var best = null;
+      var found = [];
 
-      // Strict balance first - it is the fast, common case. Failing that, allow
-      // vats to run at a deficit their capacity can absorb for the whole run,
-      // which covers levels with no balanced set at all.
-      var balanced = balancedSolve(level, model, attemptOpts, null);
-      var strategy = 'balanced';
-      if (!balanced) {
-        balanced = balancedSolve(level, model, attemptOpts, deficitAllowance(model));
-        strategy = 'buffered';
-      }
-
-      if (balanced) {
-        best = {
-          solved: true,
+      function record(strategy, played) {
+        if (!played || !played.won) return;
+        found.push({
           strategy: strategy,
-          moves: balanced.moves,
-          par: balanced.moves.length,
-          verifiedTime: balanced.elapsed,
-          minHeadroom: balanced.minHeadroom,
-          minReserve: balanced.minReserve,
-          margin: margins[m]
-        };
+          moves: played.moves,
+          toggles: played.moves.length,
+          time: played.elapsed,
+          minHeadroom: played.minHeadroom,
+          minReserve: played.minReserve
+        });
       }
 
-      // Bursts cost two toggles per pump, so they rarely beat a balanced set -
-      // but when they do the level has no balanced solution at all. Capping the
-      // event search just below the balanced par keeps it cheap and means par
-      // ends up being the true minimum across both kinds of solution.
-      attemptOpts.maxBurstMoves = best
-        ? Math.min(opts.maxBurstMoves, best.par - 1)
-        : opts.maxBurstMoves;
-      if (best) attemptOpts.maxNodes = opts.beatParNodes;
+      // Strict balance first - the fast, common case. Failing that, allow vats
+      // to run at a deficit their capacity can absorb for the whole run.
+      var balanced = balancedSolve(level, model, attemptOpts, null);
+      record('balanced', balanced);
+      if (!balanced) {
+        record('buffered', balancedSolve(level, model, attemptOpts, deficitAllowance(model)));
+      }
 
-      if (attemptOpts.maxBurstMoves >= 1 && (!best || opts.exactPar)) {
+      // Cycling is often the FASTEST route even when a steady set exists, since
+      // it runs pumps at their full rate instead of throttling to what balances.
+      // On levels with no steady state it is the only route.
+      record('cyclic', cyclicSolve(level, model, attemptOpts));
+
+      // Bursts cost two toggles per pump, so they only matter for the toggle
+      // count, and only when they can undercut what is already found.
+      var fewestSoFar = found.reduce(function (best, r) {
+        return best === null || r.toggles < best ? r.toggles : best;
+      }, null);
+
+      attemptOpts.maxBurstMoves = fewestSoFar === null
+        ? opts.maxBurstMoves
+        : Math.min(opts.maxBurstMoves, fewestSoFar - 1);
+      if (fewestSoFar !== null) attemptOpts.maxNodes = opts.beatParNodes;
+
+      if (attemptOpts.maxBurstMoves >= 1 && (!found.length || opts.exactPar)) {
         var burst = eventSearch(model, attemptOpts);
         if (burst.solved) {
           var schedule = reconstruct(model, burst.node);
           var check = verifySchedule(level, schedule, attemptOpts);
-          if (check.won && (!best || schedule.length < best.par)) {
-            best = {
-              solved: true,
-              strategy: 'burst',
-              moves: schedule,
-              par: schedule.length,
-              verifiedTime: check.elapsed,
-              minHeadroom: check.minHeadroom,
-              minReserve: check.minReserve,
-              expanded: burst.expanded,
-              margin: margins[m]
-            };
+          if (check.won) {
+            found.push({
+              strategy: 'burst', moves: schedule, toggles: schedule.length,
+              time: check.elapsed, minHeadroom: check.minHeadroom, minReserve: check.minReserve
+            });
           }
-        } else if (!best) {
+        } else if (!found.length) {
           attempts.push({ margin: margins[m], reason: burst.reason, expanded: burst.expanded });
         }
       }
 
-      if (best) return best;
+      if (!found.length) continue;
+
+      // Time is the score, so the headline solution is the quickest one; the
+      // toggle count is reported separately as a bonus stat.
+      var fastest = found.slice().sort(function (a, b) { return a.time - b.time; })[0];
+      var fewest = found.slice().sort(function (a, b) {
+        return a.toggles - b.toggles || a.time - b.time;
+      })[0];
+      // The quickest route deliberately runs vats to the brim, so its headroom
+      // says nothing about whether the level is fair. What matters is that SOME
+      // comfortable way to win exists - that is what level validation gates on.
+      var safest = found.slice().sort(function (a, b) {
+        return (b.minHeadroom || 0) - (a.minHeadroom || 0);
+      })[0];
+
+      return {
+        solved: true,
+        strategy: fastest.strategy,
+        moves: fastest.moves,
+        targetTime: fastest.time,
+        verifiedTime: fastest.time,
+        par: fewest.toggles,
+        parStrategy: fewest.strategy,
+        minHeadroom: fastest.minHeadroom,
+        minReserve: fastest.minReserve,
+        safeHeadroom: safest.minHeadroom,
+        safeTime: safest.time,
+        margin: margins[m],
+        strategies: found.map(function (r) {
+          return {
+            strategy: r.strategy, toggles: r.toggles,
+            time: r.time, headroom: r.minHeadroom
+          };
+        })
+      };
     }
 
     return { solved: false, attempts: attempts };
@@ -675,8 +794,8 @@
         return 'margin ' + a.margin + ': ' + a.reason;
       }).join('; ') + ')';
     }
-    return result.par + ' toggles (' + result.strategy + '), wins at '
-      + result.verifiedTime.toFixed(1) + 's, headroom '
+    return result.targetTime.toFixed(1) + 's via ' + result.strategy + ', par '
+      + result.par + ' toggles, headroom '
       + (result.minHeadroom === null ? 'n/a' : result.minHeadroom.toFixed(1) + ' gal') + '\n  '
       + result.moves.map(function (mv) {
         return mv.t.toFixed(2) + 's ' + mv.pumpId + ' ' + (mv.on ? 'on' : 'off');

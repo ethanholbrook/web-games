@@ -620,3 +620,28 @@ input[type="range"] {
 }
 
 .pump.is-on .pump-glyph, .pump.is-starving .pump-glyph { fill: #05210f; }
+
+
+/* ---------------------------------------------------------------- medals */
+
+.medal-gold   { color: #f2c94c; }
+.medal-silver { color: #c3ccd8; }
+.medal-bronze { color: #cd8b52; }
+
+.medal-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.medal-mark { font-size: 20px; line-height: 1; }
+
+.card-best {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

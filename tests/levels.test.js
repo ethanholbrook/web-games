@@ -21,6 +21,10 @@ var WaterWorks = globalThis.WaterWorks;
 // technically valid and miserable to play, so levels have to leave real slack.
 var MIN_HEADROOM = 3;
 
+// The opening levels exist to teach the mechanics, so they are allowed to have
+// a static answer. Everything after them must require active switching.
+var TUTORIAL_LEVELS = 3;
+
 var passed = 0;
 var failures = [];
 
@@ -147,33 +151,52 @@ WaterWorks.CAMPAIGN_SPECS.forEach(function (spec) {
     assert(replay.won, 'solution did not replay: '
       + (replay.failure ? replay.failure.kind + ' at ' + replay.failure.targetId : 'timeout'));
 
-    assert(result.minHeadroom >= MIN_HEADROOM,
-      'only ' + result.minHeadroom.toFixed(2) + ' gal of headroom - too tight to be fair');
+    // The quickest route deliberately runs vats to the brim, so fairness is
+    // judged on whether a comfortable way to win exists at all.
+    assert(result.safeHeadroom >= MIN_HEADROOM,
+      'the roomiest solution leaves only ' + result.safeHeadroom.toFixed(2)
+      + ' gal of headroom - too tight to be fair');
 
-    // par is shipped as data so the game never has to run the solver; this is
-    // what keeps that number honest.
-    assert(spec.par === result.par,
-      'declares par ' + spec.par + ' but the solver finds ' + result.par);
+    // targetTime is shipped as data so the game never has to run the solver;
+    // this is what keeps that number honest.
+    assert(Math.abs(spec.targetTime - result.targetTime) <= Math.max(1, result.targetTime * 0.05),
+      'declares a target of ' + spec.targetTime + 's but the best the solver can do is '
+      + result.targetTime.toFixed(1) + 's');
 
     if (spec.timeLimit) {
       assert(replay.elapsed < spec.timeLimit,
         'wins at ' + replay.elapsed.toFixed(1) + 's but the limit is ' + spec.timeLimit + 's');
     }
 
-    console.log('       par ' + result.par + ' (' + result.strategy + '), '
-      + result.verifiedTime.toFixed(1) + 's, headroom ' + result.minHeadroom.toFixed(1) + ' gal');
+    console.log('       target ' + result.targetTime.toFixed(1) + 's via ' + result.strategy
+      + ', ' + result.par + ' switches minimum, headroom ' + result.safeHeadroom.toFixed(1) + ' gal');
   });
 });
 
-test('the campaign gets harder', function () {
-  var pars = WaterWorks.CAMPAIGN_SPECS.map(function (spec) {
-    return WaterWorks.solve(WaterWorks.buildLevel(spec)).par;
+test('past the tutorial, no level can be won by a static set of pumps', function () {
+  // This is the whole point of the design: leaving a set of switches on and
+  // walking away must not work. A 'balanced' or 'buffered' solution means some
+  // fixed set of pumps runs to the end untouched, which makes the level a
+  // one-shot setup rather than something to manage.
+  WaterWorks.CAMPAIGN_SPECS.forEach(function (spec, i) {
+    if (i < TUTORIAL_LEVELS) return;
+    var result = WaterWorks.solve(WaterWorks.buildLevel(spec));
+    assert(result.solved, spec.id + ' is not solvable at all');
+    var staticWin = result.strategies.filter(function (s) {
+      return s.strategy === 'balanced' || s.strategy === 'buffered';
+    });
+    assert(!staticWin.length, spec.id + ' (' + spec.name + ') can be won by switching '
+      + (staticWin.length ? staticWin[0].toggles : '?')
+      + ' pumps on and leaving them - it needs no dynamic control');
   });
-  var first = pars.slice(0, 4);
-  assert(first[0] <= first[first.length - 1],
-    'the opening levels should not start at their hardest: ' + first.join(','));
-  assert(Math.max.apply(null, pars.slice(5)) >= Math.max.apply(null, pars.slice(0, 3)),
-    'later levels should demand at least as much as the opening ones');
+});
+
+test('the tutorial levels are the gentle ones', function () {
+  var specs = WaterWorks.CAMPAIGN_SPECS;
+  for (var i = 0; i < TUTORIAL_LEVELS; i++) {
+    assert(specs[i].pumps.length <= 3,
+      specs[i].id + ' is meant to be a tutorial but has ' + specs[i].pumps.length + ' pumps');
+  }
 });
 
 test('every level declares a time limit it can actually meet', function () {

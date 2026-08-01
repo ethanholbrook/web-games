@@ -23,13 +23,20 @@
   var MS_PER_DAY = 86400000;
 
   var LIMITS = {
-    minPar: 3,
-    maxPar: 8,
+    minPumps: 4,
+    maxPumps: 10,
     minHeadroom: 4,
+    minTargetTime: 20,
+    maxTargetTime: 70,
     minSeconds: 20,
-    maxSeconds: 55,
+    maxSeconds: 45,
     attempts: 60
   };
+
+  // How much faster than its supply each pipe runs. Above 1 there is no set of
+  // switches that can be left alone, so the puzzle is about managing the flow
+  // rather than finding one configuration - the same thing the campaign asks.
+  var OVERDRAW = [1.6, 2.4];
 
   function mulberry32(a) {
     return function () {
@@ -199,6 +206,14 @@
 
     var seconds = randInt(rng, LIMITS.minSeconds, LIMITS.maxSeconds);
 
+    // Inflate every pipe past what feeds it. Throughput is still capped by the
+    // inlets, so the reservoir is sized from those - the inflated rates only
+    // mean each pump must be cycled rather than switched on and forgotten.
+    var overdraw = OVERDRAW[0] + rng() * (OVERDRAW[1] - OVERDRAW[0]);
+    pumps.forEach(function (p) {
+      p.rate = Math.max(p.rate + 1, Math.round(p.rate * overdraw));
+    });
+
     return {
       id: 'daily',
       name: 'Daily #' + dayNumber,
@@ -241,6 +256,8 @@
       var spec = generateSpec(day * 7919 + attempt * 104729, day);
       if (!spec) continue;
 
+      if (spec.pumps.length < LIMITS.minPumps || spec.pumps.length > LIMITS.maxPumps) continue;
+
       var level;
       try { level = W.buildLevel(spec); } catch (err) { continue; }
 
@@ -258,9 +275,18 @@
       } catch (err) { continue; }
 
       if (!result.solved) continue;
-      if (result.par < LIMITS.minPar || result.par > LIMITS.maxPar) continue;
-      if (result.minHeadroom < LIMITS.minHeadroom) continue;
+      if (result.safeHeadroom < LIMITS.minHeadroom) continue;
+      if (result.targetTime < LIMITS.minTargetTime) continue;
+      if (result.targetTime > LIMITS.maxTargetTime) continue;
 
+      // Reject anything a fixed set of switches could win - a daily should
+      // need managing, not just configuring.
+      var staticWin = result.strategies.some(function (st) {
+        return st.strategy === 'balanced' || st.strategy === 'buffered';
+      });
+      if (staticWin) continue;
+
+      spec.targetTime = Math.round(result.targetTime * 2) / 2;
       spec.par = result.par;
       spec.attempt = attempt;
       return { spec: spec, level: W.buildLevel(spec), solution: result, dayNumber: day };
