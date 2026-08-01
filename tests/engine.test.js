@@ -3,16 +3,17 @@
  *
  *   node tests/engine.test.js
  *
- * level1.js and engine.js are classic scripts that attach to `globalThis`
- * under Node, so requiring them for their side effects is all that is needed.
+ * The game's scripts are classic scripts that attach to `globalThis` under
+ * Node, so requiring them for their side effects is all that is needed.
  */
 'use strict';
 
-require('../games/water-works/level1.js');
+require('../games/water-works/geometry.js');
+require('../games/water-works/levels.js');
 require('../games/water-works/engine.js');
 
 var WaterWorks = globalThis.WaterWorks;
-var LEVEL = WaterWorks.LEVEL1;
+var LEVEL = WaterWorks.buildLevel(WaterWorks.SANDBOX_SPEC);
 var DT = 1 / LEVEL.config.simHz;
 
 var passed = 0;

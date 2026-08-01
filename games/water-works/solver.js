@@ -50,6 +50,7 @@
     exactPar: true,        // false skips the undercut pass entirely (fast path)
     maxSteadyNodes: 400000,
     maxCandidates: 600,    // balanced sets verified per depth
+    burstThreshold: 0.85,  // fraction of capacity a burst pump waits for
     maxTime: 180,          // seconds of simulated time
     quantiseLevel: 0.05,
     marginRetries: [1.0, 2.0, 4.0]
@@ -163,7 +164,26 @@
    * no vat is asked for more than it receives, and some water reaches the
    * reservoir.
    */
-  function enumerateBalanced(model, opts, maxCount) {
+  /**
+   * How much faster than its supply a vat may be drained and still last the
+   * run. A vat holding C gallons losing d gal/s survives C/d seconds, and the
+   * run cannot possibly be shorter than filling the reservoir at full tilt, so
+   * that shortest possible run gives a safe ceiling on d.
+   */
+  function deficitAllowance(model) {
+    var allowance = new Float64Array(model.n);
+    var maxResRate = 0;
+    model.pumps.forEach(function (p) { if (p.dst === -1) maxResRate += p.rate; });
+    if (maxResRate <= EPS) return allowance;
+
+    var shortestRun = (model.resCapacity - model.resStart) / maxResRate;
+    if (shortestRun <= EPS) return allowance;
+
+    for (var i = 0; i < model.n; i++) allowance[i] = model.capacity[i] / shortestRun;
+    return allowance;
+  }
+
+  function enumerateBalanced(model, opts, maxCount, allowance) {
     var candidates = [];
     var inflow = new Float64Array(model.n);
     var chosen = [];
@@ -189,7 +209,7 @@
 
       if (!outs.length) { dfs(step + 1, count, resIn); return; }
 
-      var subsets = feasibleSubsets(model, outs, inflow[v]);
+      var subsets = feasibleSubsets(model, outs, inflow[v] + (allowance ? allowance[v] : 0));
       for (var s = 0; s < subsets.length && !stop; s++) {
         var sub = subsets[s];
         if (count + sub.size > maxCount) continue;
@@ -234,11 +254,31 @@
     var minHeadroom = Infinity;
     var minReserve = Infinity;
 
+    // Would switching `pump` on leave its source losing water?
+    function wouldStarve(pump) {
+      var net = 0;
+      game.inlets.forEach(function (inl) { if (inl.target === pump.src) net += inl.rate; });
+      game.pumpOrder.forEach(function (id) {
+        var other = game.pumps[id];
+        if (!other.on) return;
+        if (other.dst === pump.src) net += other.rate;
+        if (other.src === pump.src) net -= other.rate;
+      });
+      return net - pump.rate < -EPS;
+    }
+
     game.start();
     while (!game.isOver() && game.elapsed < limit) {
       for (var i = pending.length - 1; i >= 0; i--) {
         var pump = game.pumps[pending[i]];
-        if (game.vats[pump.src].level >= opts.margin) {
+        var source = game.vats[pump.src];
+        // A pump its source can sustain goes on as soon as there is anything to
+        // draw. One that outruns its supply has to wait for a full buffer,
+        // otherwise it drains the vat and trips immediately.
+        var threshold = wouldStarve(pump)
+          ? source.capacity * opts.burstThreshold
+          : opts.margin;
+        if (source.level >= threshold) {
           game.togglePump(pump.id);
           moves.push({ t: game.elapsed, pumpId: pump.id, on: true });
           pending.splice(i, 1);
@@ -270,9 +310,9 @@
     };
   }
 
-  function balancedSolve(level, model, opts) {
+  function balancedSolve(level, model, opts, allowance) {
     for (var size = 1; size <= Math.min(opts.maxMoves, model.pumps.length); size++) {
-      var candidates = enumerateBalanced(model, opts, size);
+      var candidates = enumerateBalanced(model, opts, size, allowance);
       for (var c = 0; c < candidates.length; c++) {
         if (candidates[c].count !== size) continue;
         var ids = candidates[c].pumps.map(function (k) { return model.pumps[k].id; });
@@ -558,11 +598,20 @@
       var model = buildModel(level, attemptOpts);
       var best = null;
 
-      var balanced = balancedSolve(level, model, attemptOpts);
+      // Strict balance first - it is the fast, common case. Failing that, allow
+      // vats to run at a deficit their capacity can absorb for the whole run,
+      // which covers levels with no balanced set at all.
+      var balanced = balancedSolve(level, model, attemptOpts, null);
+      var strategy = 'balanced';
+      if (!balanced) {
+        balanced = balancedSolve(level, model, attemptOpts, deficitAllowance(model));
+        strategy = 'buffered';
+      }
+
       if (balanced) {
         best = {
           solved: true,
-          strategy: 'balanced',
+          strategy: strategy,
           moves: balanced.moves,
           par: balanced.moves.length,
           verifiedTime: balanced.elapsed,

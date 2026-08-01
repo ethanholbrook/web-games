@@ -147,18 +147,33 @@ test('skips a pump it can win without', function () {
   assert(replay.won, 'three-toggle schedule did not replay');
 });
 
-test('finds a burst when no balanced set exists', function () {
+test('wins by draining a buffer when no balanced set exists', function () {
   // The only pump to the reservoir moves 10 gal/s but the inlet supplies 2, so
-  // no set balances. The win has to come from draining a buffer.
+  // nothing balances. The win has to come from letting the vat fill first.
   var level = makeLevel({
     vats: ['V1:40'], reservoir: 30, inlets: ['V1@2'], pumps: ['P1:V1>R@10']
   });
   var result = WaterWorks.solve(level);
-  assert(result.solved, 'expected a burst solution');
-  assert(result.strategy === 'burst', 'expected burst, got ' + result.strategy);
+  assert(result.solved, 'expected a solution');
+  assert(result.strategy !== 'balanced',
+    'no balanced set exists here, so the strategy should not be balanced');
 
   var replay = WaterWorks.verifySchedule(level, result.moves);
-  assert(replay.won, 'burst schedule did not replay');
+  assert(replay.won, 'schedule did not replay');
+  assert(replay.moves === 1, 'expected a single toggle, got ' + replay.moves);
+});
+
+test('the event search can undercut a balanced par', function () {
+  // Balanced play needs all four pumps; the run is short enough to win with
+  // three, which only the event search finds.
+  var level = makeLevel({
+    vats: ['V1:40', 'V2:40', 'V3:40'], reservoir: 120, inlets: ['V1@6'],
+    pumps: ['P1:V1>V2@4', 'P2:V1>V3@2', 'P3:V2>R@4', 'P4:V3>R@2']
+  });
+  var result = WaterWorks.solve(level);
+  assert(result.solved, 'expected a solution');
+  assert(result.strategy === 'burst', 'expected burst, got ' + result.strategy);
+  assert(result.par === 3, 'expected par 3, got ' + result.par);
 });
 
 test('par is the smaller of the two strategies', function () {
