@@ -189,6 +189,14 @@
       .forEach(function (row) { if (!(row in rowMap)) rowMap[row] = nextRow++; });
     vats.forEach(function (v) { v.col = colMap[v.col]; v.row = rowMap[v.row]; });
 
+    // Renumber V1, V2, V3... in reading order. The grid-position ids used while
+    // building are unambiguous but read badly on screen ("V21" is not vat 21).
+    vats.sort(function (a, b) { return a.row - b.row || a.col - b.col; });
+    var rename = {};
+    vats.forEach(function (v, i) { rename[v.id] = 'V' + (i + 1); });
+    rename.R = 'R';
+    vats.forEach(function (v) { v.id = rename[v.id]; });
+
     var seconds = randInt(rng, LIMITS.minSeconds, LIMITS.maxSeconds);
 
     return {
@@ -202,9 +210,10 @@
       rows: nextRow,
       vats: vats,
       reservoir: { capacity: totalToReservoir * seconds },
-      inlets: inlets.filter(function (inl) { return live[inl.target]; }),
+      inlets: inlets.filter(function (inl) { return live[inl.target]; })
+        .map(function (inl) { return { target: rename[inl.target], rate: inl.rate }; }),
       pumps: pumps.map(function (p) {
-        return { id: p.id, src: p.src, dst: p.dst, rate: p.rate };
+        return { id: p.id, src: rename[p.src], dst: rename[p.dst], rate: p.rate };
       })
     };
   }
