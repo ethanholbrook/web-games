@@ -33,6 +33,7 @@
   function Game(level) {
     this.level = level;
     this.cfg = level.config;
+    this.fixedRates = level.mode === 'puzzle';
     this.reset();
   }
 
@@ -43,14 +44,17 @@
     this.status = 'IDLE';
     this.elapsed = 0;
     this.failure = null;
+    this.moves = 0;
 
     this.vats = {};
     this.vatOrder = [];
+    this.reservoirId = null;
     this.level.vats.forEach(function (v) {
+      if (v.reservoir) self.reservoirId = v.id;
       self.vats[v.id] = {
         id: v.id,
         label: v.label,
-        level: 0,
+        level: v.start || 0,
         capacity: v.capacity,
         reservoir: !!v.reservoir,
         netFlow: 0
@@ -58,6 +62,8 @@
       self.vatOrder.push(v.id);
     });
 
+    // In puzzle mode every rate comes from the level and never changes; in
+    // sandbox mode pumps start at a default the player is free to retune.
     this.pumps = {};
     this.pumpOrder = [];
     this.level.pumps.forEach(function (p) {
@@ -67,7 +73,7 @@
         dst: p.dst,
         description: p.description,
         on: false,
-        rate: self.cfg.defaultPumpRate,
+        rate: p.rate === undefined ? self.cfg.defaultPumpRate : p.rate,
         flow: 0,
         starving: false,
         starveTimer: 0
@@ -76,7 +82,14 @@
     });
 
     this.inlets = this.level.inlets.map(function (i) {
-      return { id: i.id, name: i.name, target: i.target, description: i.description, rate: 0, flow: 0 };
+      return {
+        id: i.id,
+        name: i.name,
+        target: i.target,
+        description: i.description,
+        rate: i.rate === undefined ? 0 : i.rate,
+        flow: 0
+      };
     });
   };
 
@@ -96,6 +109,7 @@
     var p = this.pumps[id];
     if (!p || this.isOver()) return false;
     p.on = !p.on;
+    this.moves++;
     if (!p.on) {
       p.flow = 0;
       p.starving = false;
@@ -106,13 +120,13 @@
 
   Game.prototype.setPumpRate = function (id, gps) {
     var p = this.pumps[id];
-    if (!p || this.isOver()) return;
+    if (!p || this.isOver() || this.fixedRates) return;
     p.rate = snapRate(gps, this.cfg.rateStep, this.cfg.maxPumpRate);
   };
 
   Game.prototype.setInletRate = function (index, gps) {
     var inlet = this.inlets[index];
-    if (!inlet || this.isOver()) return;
+    if (!inlet || this.isOver() || this.fixedRates) return;
     inlet.rate = snapRate(gps, this.cfg.rateStep, this.cfg.maxInletRate);
   };
 
@@ -127,7 +141,7 @@
     var sum = 0;
     for (var i = 0; i < this.pumpOrder.length; i++) {
       var p = this.pumps[this.pumpOrder[i]];
-      if (p.dst === 'V10') sum += p.flow;
+      if (p.dst === this.reservoirId) sum += p.flow;
     }
     return sum;
   };
@@ -203,8 +217,8 @@
     }
 
     // 5. The reservoir only ever receives.
-    var res = this.vats.V10;
-    res.netFlow = inflow.V10 || 0;
+    var res = this.vats[this.reservoirId];
+    res.netFlow = inflow[this.reservoirId] || 0;
     res.level = Math.min(res.capacity, res.level + res.netFlow * dt);
 
     this.elapsed += dt;
@@ -217,13 +231,16 @@
       this.failure = { kind: 'DRY_RUN', targetId: starvedPump.id, label: starvedPump.id };
     } else if (res.level >= res.capacity - EPS) {
       this.status = 'WON';
+    } else if (this.level.timeLimit && this.elapsed >= this.level.timeLimit) {
+      this.status = 'LOST';
+      this.failure = { kind: 'TIMEOUT', targetId: res.id, label: res.label };
     }
 
     return this.status;
   };
 
   Game.prototype.progress = function () {
-    var res = this.vats.V10;
+    var res = this.vats[this.reservoirId];
     return res.level / res.capacity;
   };
 
