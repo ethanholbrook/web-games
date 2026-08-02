@@ -322,18 +322,17 @@ input[type="range"] {
 
 .pipe-base {
   stroke: var(--pipe-idle);
-  stroke-width: 13;
   stroke-linecap: round;
   fill: none;
+  /* stroke-width is set per pipe from its flow rate */
 }
 
 .pipe-flow {
   stroke: var(--water-bright);
-  stroke-width: 9;
   stroke-linecap: butt;
-  stroke-dasharray: 14 10;
   fill: none;
   opacity: 0;
+  /* stroke-width and dashes are set per pipe from its flow rate */
 }
 
 .pipe-flow.is-flowing { opacity: 1; }
@@ -399,7 +398,7 @@ input[type="range"] {
 
 .pump-label {
   fill: #08111d;
-  font: 700 22px system-ui, sans-serif;
+  font: 700 18px system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
@@ -407,7 +406,7 @@ input[type="range"] {
 
 .pump-rate {
   fill: var(--text-dim);
-  font: 500 15px system-ui, sans-serif;
+  font: 500 13px system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   text-anchor: middle;
   dominant-baseline: middle;
@@ -596,7 +595,7 @@ input[type="range"] {
 /* Fixed rates belong to the pipe, not the switch - they never change. */
 .rate-badge {
   fill: var(--water-bright);
-  font: 600 26px system-ui, sans-serif;
+  font: 600 23px system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   text-anchor: middle;
   dominant-baseline: middle;
@@ -609,7 +608,7 @@ input[type="range"] {
 
 .pump-glyph {
   fill: #08111d;
-  font: 700 20px system-ui, sans-serif;
+  font: 700 16px system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;

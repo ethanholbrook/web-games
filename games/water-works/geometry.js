@@ -36,19 +36,22 @@
 
   // Layout constants.
   //
-  // The whole diagram is scaled to fit the stage, so what decides whether a
-  // switch can be tapped is its share of the viewBox - not its raw number. That
-  // makes the total unit count matter: a compact viewBox scales up more, so the
-  // world is kept small and the buttons large within it. At three columns the
-  // viewBox is 648 wide and a switch is 84x56 of it, landing at roughly 48x32px
-  // on a 390px phone, against 39x18px before.
+  // Everything is proportional to COL_PITCH, so the plant reads the same at any
+  // grid size. The ratios that matter:
   //
-  // Vats are small relative to the column and row pitch on purpose: the gaps
-  // between them are where the pipes, switches and rate labels have to live.
-  var VAT_W = 92;
-  var VAT_H = 100;
+  //   vat width      0.43 x pitch   leaves 0.57 between columns
+  //   switch width   0.31 x pitch   sits inside that gap with room either side
+  //   pipe (widest)  0.11 x pitch   thick enough to read, thin enough to pass
+  //                                 under a switch
+  //
+  // The diagram is scaled to fit the stage, so a switch's size in pixels comes
+  // from its share of the viewBox rather than its raw number. Keeping the world
+  // compact is what makes it tappable on a phone: at three columns the viewBox
+  // is 648 wide, so a 66-unit switch lands at ~38px.
   var COL_PITCH = 212;
   var ROW_PITCH = 265;
+  var VAT_W = 92;
+  var VAT_H = 100;
   var FIRST_COL_X = 112;      // centre of column 0
   var FIRST_ROW_Y = 60;       // top of row 0
   var INLET_TOP = 6;
@@ -59,14 +62,25 @@
 
   var PORT_DX = 32;           // diagonals leave this far off centre
   var LATERAL_INSET = 32;     // laterals run this far above the vat floor
-  var BUTTON_W = 84;
-  var BUTTON_H = 56;
+  var BUTTON_W = 66;
+  var BUTTON_H = 44;
   // Crossing diagonals separate by span*|1 - 2t|, so a smaller t pushes the pair
   // apart AND lifts them clear of the vertical switch sitting mid-band between
   // the same two rows. 0.16 clears both while keeping each below its source vat.
   var DIAGONAL_T = 0.16;
-  var PARALLEL_GAP = 108;     // spacing between pipes joining the same two vats
-  var LABEL_OFFSET = 60;      // how far a rate badge sits off its pipe
+  var PARALLEL_GAP = 100;     // spacing between pipes joining the same two vats
+  var LABEL_OFFSET = 50;      // how far a rate badge sits off its pipe
+
+  // Pipe thickness carries the flow rate, so the plant can be read at a glance
+  // before any of the numbers are. Measured against the same reference rate on
+  // every level, so a 10 gal/s pipe looks identical wherever it appears.
+  var PIPE_MIN_W = 8;
+  var PIPE_MAX_W = 24;
+
+  function pipeWidth(rate, maxRate) {
+    var t = Math.max(0, Math.min(1, (rate || 0) / (maxRate || 12)));
+    return Math.round((PIPE_MIN_W + (PIPE_MAX_W - PIPE_MIN_W) * t) * 10) / 10;
+  }
 
   var INLET_NAMES = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -103,9 +117,22 @@
       b = { x: dst.cx - dir * PORT_DX, y: dst.top };
     }
 
-    // Shift parallel runs apart along the pipe's own perpendicular.
-    var labelDX = kind === 'lateral' ? 0 : LABEL_OFFSET;
-    var labelDY = kind === 'lateral' ? -LABEL_OFFSET / 2 : 0;
+    // Where the rate badge sits relative to its switch. Pushing every badge
+    // straight out to the right works for a vertical run, but on a diagonal it
+    // lands on whatever pipe the next column has there - so a diagonal's badge
+    // follows its own direction of travel and lifts, into the open band beside
+    // the vat it came from.
+    var labelDX, labelDY;
+    if (kind === 'lateral') {
+      labelDX = 0;
+      labelDY = -LABEL_OFFSET * 0.5;
+    } else if (kind === 'diagonal') {
+      labelDX = (b.x >= a.x ? 1 : -1) * LABEL_OFFSET * 0.72;
+      labelDY = -LABEL_OFFSET * 0.72;
+    } else {
+      labelDX = LABEL_OFFSET;
+      labelDY = 0;
+    }
 
     if (slots > 1) {
       var dx = b.x - a.x;
@@ -219,6 +246,7 @@
         src: p.src,
         dst: p.dst,
         rate: p.rate,
+        width: pipeWidth(p.rate, config.maxPumpRate),
         kind: kind,
         path: geom.path,
         length: geom.length,
@@ -238,6 +266,7 @@
         name: 'Inlet ' + (INLET_NAMES[i] || i + 1),
         target: inlet.target,
         rate: inlet.rate,
+        width: pipeWidth(inlet.rate, config.maxInletRate),
         path: 'M ' + vat.cx + ' ' + INLET_TOP + ' L ' + vat.cx + ' ' + vat.top,
         length: vat.top - INLET_TOP,
         description: 'Inlet ' + (INLET_NAMES[i] || i + 1) + ' → ' + vat.label
@@ -254,6 +283,7 @@
       par: spec.par,
       view: { width: width, height: height },
       button: { w: BUTTON_W, h: BUTTON_H },
+      pipe: { min: PIPE_MIN_W, max: PIPE_MAX_W },
       vats: vats,
       vatById: vatById,
       reservoirId: reservoirId,
@@ -264,5 +294,6 @@
 
   root.WaterWorks = root.WaterWorks || {};
   root.WaterWorks.buildLevel = buildLevel;
+  root.WaterWorks.pipeWidth = pipeWidth;
   root.WaterWorks.defaultConfig = DEFAULT_CONFIG;
 })(typeof window !== 'undefined' ? window : globalThis);

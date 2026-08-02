@@ -176,6 +176,27 @@ check('sandbox keeps its sliders',
 check('sandbox shows the inspector',
   !(await page.$eval('#panel-inspector', (n) => n.hidden)));
 
+// Pipe thickness carries the rate, so in sandbox - where rates are live - it
+// has to follow the slider rather than being baked in when the scene is built.
+const widthOfP1 = () => page.evaluate(() => {
+  // Layer order is: inlet pipes first, then pump pipes, each as a casing
+  // followed by its flow overlay. Sandbox has three inlets, so P1's casing is
+  // the seventh path.
+  const paths = [...document.querySelectorAll('#scene path.pipe-base')];
+  return parseFloat(paths[3].getAttribute('stroke-width'));
+});
+
+const widthBefore = await widthOfP1();
+await page.click(pump('P1'));                                  // selects it
+await page.$eval('#inspector input[type=range]', (el) => {
+  el.value = '12';
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.waitForTimeout(150);
+const widthAfter = await widthOfP1();
+check('pipe thickness follows the rate live in sandbox', widthAfter > widthBefore,
+  `${widthBefore} -> ${widthAfter}`);
+
 // ----------------------------------------------------------------- layout
 await page.setViewportSize({ width: 400, height: 900 });
 await page.waitForTimeout(300);

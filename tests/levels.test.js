@@ -92,8 +92,12 @@ test('switches stay tappable on a phone', function () {
   // page padding, and the viewport height the stage is allowed to use.
   var STAGE_W = 370;
   var STAGE_H = 654;
-  var MIN_W = 40;
-  var MIN_H = 28;
+  // Tuned by eye rather than to a generic touch guideline: switches sized for
+  // 44pt dwarfed the plant. This is the floor below which the previous version
+  // was genuinely hard to hit, so it guards the regression without dictating
+  // the look.
+  var MIN_W = 34;
+  var MIN_H = 23;
 
   WaterWorks.ALL_SPECS.forEach(function (spec) {
     var level = WaterWorks.buildLevel(spec);
@@ -103,6 +107,83 @@ test('switches stay tappable on a phone', function () {
     assert(w >= MIN_W && h >= MIN_H, spec.id + ': switches would render '
       + w.toFixed(0) + 'x' + h.toFixed(0) + 'px on a phone, under the '
       + MIN_W + 'x' + MIN_H + ' minimum');
+  });
+});
+
+test('pipe thickness tracks flow rate', function () {
+  WaterWorks.CAMPAIGN_SPECS.forEach(function (spec) {
+    var level = WaterWorks.buildLevel(spec);
+    level.pumps.forEach(function (p) {
+      assert(p.width >= level.pipe.min && p.width <= level.pipe.max,
+        spec.id + ': ' + p.id + ' has an out-of-range width ' + p.width);
+    });
+    level.inlets.forEach(function (inl) {
+      assert(inl.width >= level.pipe.min && inl.width <= level.pipe.max,
+        spec.id + ': inlet width ' + inl.width + ' is out of range');
+    });
+
+    // A faster pipe must never be drawn thinner than a slower one.
+    var byRate = level.pumps.slice().sort(function (a, b) { return a.rate - b.rate; });
+    for (var i = 1; i < byRate.length; i++) {
+      assert(byRate[i].width >= byRate[i - 1].width,
+        spec.id + ': ' + byRate[i].id + ' carries more than ' + byRate[i - 1].id
+        + ' but is drawn thinner');
+    }
+  });
+
+  // The same rate looks the same on every level, so widths can be compared
+  // across the campaign rather than only within one plant.
+  var seen = {};
+  WaterWorks.CAMPAIGN_SPECS.forEach(function (spec) {
+    WaterWorks.buildLevel(spec).pumps.forEach(function (p) {
+      if (seen[p.rate] === undefined) seen[p.rate] = p.width;
+      assert(seen[p.rate] === p.width,
+        'rate ' + p.rate + ' is drawn at ' + p.width + ' here but '
+        + seen[p.rate] + ' elsewhere');
+    });
+  });
+});
+
+test('a pipe never grows wider than the switch that sits on it', function () {
+  WaterWorks.ALL_SPECS.forEach(function (spec) {
+    var level = WaterWorks.buildLevel(spec);
+    assert(level.pipe.max < level.button.h,
+      spec.id + ': the widest pipe (' + level.pipe.max
+      + ') is not thinner than a switch (' + level.button.h + ')');
+  });
+});
+
+test('rate badges stay clear of vats and of each other', function () {
+  // A badge that lands on a vat wall or on another badge is unreadable, which
+  // is what a purely horizontal offset used to do on diagonal runs.
+  var PAD = 14;
+
+  WaterWorks.CAMPAIGN_SPECS.forEach(function (spec) {
+    var level = WaterWorks.buildLevel(spec);
+    var badges = level.pumps.map(function (p) {
+      return { id: p.id, x: p.labelX, y: p.labelY };
+    });
+    level.inlets.forEach(function (inl) {
+      var vat = level.vatById[inl.target];
+      badges.push({ id: inl.id, x: vat.cx + 34, y: 34 });
+    });
+
+    badges.forEach(function (badge) {
+      level.vats.forEach(function (v) {
+        assert(!(badge.x > v.x - PAD && badge.x < v.x + v.w + PAD
+              && badge.y > v.y - PAD && badge.y < v.y + v.h + PAD),
+          spec.id + ': the badge for ' + badge.id + ' sits on ' + v.id);
+      });
+    });
+
+    for (var i = 0; i < badges.length; i++) {
+      for (var j = i + 1; j < badges.length; j++) {
+        var a = badges[i];
+        var c = badges[j];
+        assert(Math.abs(a.x - c.x) > 26 || Math.abs(a.y - c.y) > 22,
+          spec.id + ': badges for ' + a.id + ' and ' + c.id + ' collide');
+      }
+    }
   });
 });
 

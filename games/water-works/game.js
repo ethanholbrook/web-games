@@ -91,6 +91,16 @@
 
   function fmtRate(gps) { return gps.toFixed(1) + ' gal/s'; }
 
+  /* A pipe is drawn as a casing with water inside it, so the moving stroke is
+     always narrower than the pipe carrying it, and its dashes scale with the
+     bore - a fat pipe gets chunky dashes rather than the same fine ones. */
+  function applyPipeWidth(node, base, flow) {
+    var inner = Math.max(4, base - 5);
+    setAttr(node.base, 'stroke-width', base);
+    setAttr(flow, 'stroke-width', inner);
+    setAttr(flow, 'stroke-dasharray', (inner * 1.5).toFixed(1) + ' ' + (inner * 1.1).toFixed(1));
+  }
+
   // --------------------------------------------------------------- storage
 
   function loadProgress() {
@@ -224,10 +234,11 @@
     var puzzle = level.mode === 'puzzle';
 
     level.inlets.forEach(function (inlet) {
-      layerPipes.appendChild(svg('path', { d: inlet.path, class: 'pipe-base' }));
+      var base = svg('path', { d: inlet.path, class: 'pipe-base' });
+      layerPipes.appendChild(base);
       var flow = svg('path', { d: inlet.path, class: 'pipe-flow inlet-flow' });
       layerPipes.appendChild(flow);
-      nodes.inlets.push({ def: inlet, flow: flow, dash: 0 });
+      nodes.inlets.push({ def: inlet, base: base, flow: flow, dash: 0 });
 
       if (puzzle) {
         var vat = level.vatById[inlet.target];
@@ -238,10 +249,11 @@
     });
 
     level.pumps.forEach(function (pump) {
-      layerPipes.appendChild(svg('path', { d: pump.path, class: 'pipe-base' }));
+      var base = svg('path', { d: pump.path, class: 'pipe-base' });
+      layerPipes.appendChild(base);
       var flow = svg('path', { d: pump.path, class: 'pipe-flow' });
       layerPipes.appendChild(flow);
-      nodes.pumps[pump.id] = { def: pump, flow: flow, dash: 0 };
+      nodes.pumps[pump.id] = { def: pump, base: base, flow: flow, dash: 0 };
 
       // In puzzle mode the rate belongs to the pipe, not the switch - it never
       // changes, so it reads as a property of the plant.
@@ -305,17 +317,17 @@
 
       // The glyph carries the same information as the colour, so on/off/
       // starving stay distinguishable without relying on hue.
-      var glyph = svg('text', { class: 'pump-glyph', x: pump.buttonX, y: pump.buttonY - 12 });
+      var glyph = svg('text', { class: 'pump-glyph', x: pump.buttonX, y: pump.buttonY - 9 });
       group.appendChild(glyph);
 
-      var label = svg('text', { class: 'pump-label', x: pump.buttonX, y: pump.buttonY + 11 });
+      var label = svg('text', { class: 'pump-label', x: pump.buttonX, y: pump.buttonY + 9 });
       label.textContent = pump.id;
       group.appendChild(label);
 
-      var rate = puzzle ? null : svg('text', { class: 'pump-rate', x: pump.buttonX, y: pump.buttonY + 18 });
+      var rate = puzzle ? null : svg('text', { class: 'pump-rate', x: pump.buttonX, y: pump.buttonY + 15 });
       if (rate) {
-        setAttr(label, 'y', pump.buttonY + 2);
-        setAttr(glyph, 'y', pump.buttonY - 15);
+        setAttr(label, 'y', pump.buttonY + 1);
+        setAttr(glyph, 'y', pump.buttonY - 13);
         group.appendChild(rate);
       }
 
@@ -524,6 +536,8 @@
       setText(node.glyph, showStarving ? GLYPH.starving : pump.on ? GLYPH.on : GLYPH.off);
       if (node.rateText) setText(node.rateText, pump.rate.toFixed(1));
 
+      applyPipeWidth(node, W.pipeWidth(pump.rate, level.config.maxPumpRate), node.flow);
+
       setClass(node.flow, 'pipe-flow'
         + (flowing ? ' is-flowing' : '')
         + (showStarving ? ' is-starving' : ''));
@@ -544,6 +558,7 @@
     nodes.inlets.forEach(function (node, index) {
       var inlet = game.inlets[index];
       var flowing = inlet.rate > 0 && game.status === 'RUNNING';
+      applyPipeWidth(node, W.pipeWidth(inlet.rate, level.config.maxInletRate), node.flow);
       setClass(node.flow, 'pipe-flow inlet-flow' + (flowing ? ' is-flowing' : ''));
       if (flowing && !reducedMotion) {
         node.dash = (node.dash - inlet.rate * DASH_UNITS_PER_GALLON * realDt) % 1000;

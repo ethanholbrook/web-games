@@ -17,7 +17,9 @@ python3 -m http.server 8000
 
 A plumbing puzzle. Inlets feed a grid of vats, pumps move water down and across
 into a reservoir at the bottom, and **every pipe moves a fixed number of gallons
-per second, printed beside it**. Your only control is which pumps are running.
+per second, printed beside it and drawn into its thickness** — so the plant can
+be read at a glance before any of the numbers are. Your only control is which
+pumps are running.
 
 **Goal:** fill the reservoir to 100%, as fast as you can. **The clock is the
 score** — each level has a target time from the solver, and beating it earns a
