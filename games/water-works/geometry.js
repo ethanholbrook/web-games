@@ -34,26 +34,39 @@
     simHz: 60
   };
 
-  // Layout constants. Column and row pitch are what make the grid scale.
-  var VAT_W = 160;
-  var VAT_H = 170;
-  var COL_PITCH = 300;
-  var ROW_PITCH = 290;
-  var FIRST_COL_X = 200;      // centre of column 0
-  var FIRST_ROW_Y = 80;       // top of row 0
-  var INLET_TOP = 8;
-  var OUTLET_BAND = 100;      // gap between the last row and the reservoir
-  var RESERVOIR_H = 140;
-  var RESERVOIR_PAD = 20;     // how far the reservoir overhangs the outer vats
+  // Layout constants.
+  //
+  // The whole diagram is scaled to fit the stage, so what decides whether a
+  // switch can be tapped is its share of the viewBox - not its raw number. That
+  // makes the total unit count matter: a compact viewBox scales up more, so the
+  // world is kept small and the buttons large within it. At three columns the
+  // viewBox is 648 wide and a switch is 84x56 of it, landing at roughly 48x32px
+  // on a 390px phone, against 39x18px before.
+  //
+  // Vats are small relative to the column and row pitch on purpose: the gaps
+  // between them are where the pipes, switches and rate labels have to live.
+  var VAT_W = 92;
+  var VAT_H = 100;
+  var COL_PITCH = 212;
+  var ROW_PITCH = 265;
+  var FIRST_COL_X = 112;      // centre of column 0
+  var FIRST_ROW_Y = 60;       // top of row 0
+  var INLET_TOP = 6;
+  var OUTLET_BAND = 80;       // gap between the last row and the reservoir
+  var RESERVOIR_H = 95;
+  var RESERVOIR_PAD = 16;     // how far the reservoir overhangs the outer vats
   var BOTTOM_PAD = 10;
 
-  var PORT_DX = 55;           // diagonals leave this far off centre
-  var LATERAL_INSET = 22;     // laterals run this far above the vat floor
-  var BUTTON_W = 54;
-  var BUTTON_H = 30;
-  var DIAGONAL_T = 0.28;      // keeps crossing pairs clear of one another
-  var PARALLEL_GAP = 84;      // spacing between pipes joining the same two vats
-  var LABEL_OFFSET = 42;      // how far a rate badge sits off its pipe
+  var PORT_DX = 32;           // diagonals leave this far off centre
+  var LATERAL_INSET = 32;     // laterals run this far above the vat floor
+  var BUTTON_W = 84;
+  var BUTTON_H = 56;
+  // Crossing diagonals separate by span*|1 - 2t|, so a smaller t pushes the pair
+  // apart AND lifts them clear of the vertical switch sitting mid-band between
+  // the same two rows. 0.16 clears both while keeping each below its source vat.
+  var DIAGONAL_T = 0.16;
+  var PARALLEL_GAP = 108;     // spacing between pipes joining the same two vats
+  var LABEL_OFFSET = 60;      // how far a rate badge sits off its pipe
 
   var INLET_NAMES = ['A', 'B', 'C', 'D', 'E', 'F'];
 

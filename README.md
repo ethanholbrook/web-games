@@ -65,7 +65,7 @@ against the same files the browser loads.
 |---|---|
 | `tests/engine.test.js` | Conservation of mass, overflow and dry-run detection, the starvation grace timer, proportional sharing when several pumps drain one vat, determinism |
 | `tests/solver.test.js` | That solutions are sound, that the reported time is the quickest found, and that unsolvable levels are correctly reported as such |
-| `tests/levels.test.js` | Solves every shipped level from scratch, replays it through the engine, checks the declared target time, and enforces that no level past the tutorial has a static answer |
+| `tests/levels.test.js` | Solves every shipped level from scratch, replays it through the engine, checks the declared target time, enforces that no level past the tutorial has a static answer, and that every switch stays tappable on a phone |
 | `tests/browser.test.mjs` | Renders, plays a level to a win through the DOM, checks the failure paths, and asserts no script errors |
 
 ### Why the solver exists

@@ -86,6 +86,37 @@ test('pump buttons never overlap', function () {
   });
 });
 
+test('switches stay tappable on a phone', function () {
+  // The diagram is scaled to fit, so a switch's share of the viewBox is what
+  // decides its size in pixels. Measured against a 390px-wide phone, minus the
+  // page padding, and the viewport height the stage is allowed to use.
+  var STAGE_W = 370;
+  var STAGE_H = 654;
+  var MIN_W = 40;
+  var MIN_H = 28;
+
+  WaterWorks.ALL_SPECS.forEach(function (spec) {
+    var level = WaterWorks.buildLevel(spec);
+    var scale = Math.min(STAGE_W / level.view.width, STAGE_H / level.view.height);
+    var w = level.button.w * scale;
+    var h = level.button.h * scale;
+    assert(w >= MIN_W && h >= MIN_H, spec.id + ': switches would render '
+      + w.toFixed(0) + 'x' + h.toFixed(0) + 'px on a phone, under the '
+      + MIN_W + 'x' + MIN_H + ' minimum');
+  });
+});
+
+test('the diagram fits a phone without sideways scrolling', function () {
+  // Anything wider than about 3:2 would be squeezed flat once fitted to a
+  // portrait screen, which is what forced horizontal scrolling before.
+  WaterWorks.ALL_SPECS.forEach(function (spec) {
+    var level = WaterWorks.buildLevel(spec);
+    var aspect = level.view.width / level.view.height;
+    assert(aspect <= 1.5, spec.id + ' is ' + aspect.toFixed(2)
+      + ':1 - too wide to fit a portrait phone');
+  });
+});
+
 test('puzzle levels give every pipe an explicit rate', function () {
   WaterWorks.CAMPAIGN_SPECS.forEach(function (spec) {
     spec.pumps.forEach(function (p) {

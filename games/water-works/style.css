@@ -182,7 +182,7 @@ html, body {
 
 .stage-inner {
   margin: 0 auto;
-  aspect-ratio: 1000 / 1080;
+  aspect-ratio: 648 / 875;   /* replaced per level from JS */
   max-height: calc(100vh - 190px);
   background: #000;
   border: 1px solid var(--line);
@@ -322,16 +322,16 @@ input[type="range"] {
 
 .pipe-base {
   stroke: var(--pipe-idle);
-  stroke-width: 11;
+  stroke-width: 13;
   stroke-linecap: round;
   fill: none;
 }
 
 .pipe-flow {
   stroke: var(--water-bright);
-  stroke-width: 7;
+  stroke-width: 9;
   stroke-linecap: butt;
-  stroke-dasharray: 16 12;
+  stroke-dasharray: 14 10;
   fill: none;
   opacity: 0;
 }
@@ -346,7 +346,7 @@ input[type="range"] {
 .vat-body {
   fill: none;
   stroke: var(--steel);
-  stroke-width: 4;
+  stroke-width: 3;
 }
 
 .vat-fill { fill: var(--water); }
@@ -362,7 +362,7 @@ input[type="range"] {
 
 .vat-label {
   fill: var(--steel);
-  font: 600 20px system-ui, sans-serif;
+  font: 600 17px system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
@@ -370,15 +370,15 @@ input[type="range"] {
 
 .vat-reading {
   fill: #cfe0f5;
-  font: 500 15px/1 system-ui, sans-serif;
+  font: 500 12px/1 system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
 }
 
-.reservoir-label { font-size: 26px; }
-.reservoir-reading { font-size: 20px; fill: var(--steel); }
+.reservoir-label { font-size: 24px; }
+.reservoir-reading { font-size: 17px; fill: var(--steel); }
 
 .pump { cursor: pointer; }
 .pump:focus { outline: none; }
@@ -399,7 +399,7 @@ input[type="range"] {
 
 .pump-label {
   fill: #08111d;
-  font: 700 14px system-ui, sans-serif;
+  font: 700 22px system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
@@ -407,7 +407,7 @@ input[type="range"] {
 
 .pump-rate {
   fill: var(--text-dim);
-  font: 500 11px system-ui, sans-serif;
+  font: 500 15px system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   text-anchor: middle;
   dominant-baseline: middle;
@@ -484,11 +484,9 @@ input[type="range"] {
   .actions { width: 100%; }
   .actions .btn { flex: 1; }
 
-  /* Below this the whole plant is too small to aim at, so let the diagram
-     scroll inside its own box rather than shrinking further. */
-  .stage { overflow-x: auto; }
-  .stage-inner { min-width: 480px; }
-  .stage-hint-narrow { display: block; }
+  /* The diagram now scales to fit: vats are small relative to the grid pitch,
+     so buttons stay tappable at phone width without any sideways scrolling. */
+  .stage-inner { max-width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -587,8 +585,6 @@ input[type="range"] {
 .layout.is-solo { grid-template-columns: minmax(0, 1fr); }
 .layout.is-solo .stage-inner { max-width: 760px; }
 
-.stage-hint-narrow { display: none; }
-
 .stage-hint {
   margin: 10px auto 0;
   max-width: 62ch;
@@ -600,7 +596,7 @@ input[type="range"] {
 /* Fixed rates belong to the pipe, not the switch - they never change. */
 .rate-badge {
   fill: var(--water-bright);
-  font: 600 20px system-ui, sans-serif;
+  font: 600 26px system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   text-anchor: middle;
   dominant-baseline: middle;
@@ -613,7 +609,7 @@ input[type="range"] {
 
 .pump-glyph {
   fill: #08111d;
-  font: 700 12px system-ui, sans-serif;
+  font: 700 20px system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;

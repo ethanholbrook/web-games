@@ -211,6 +211,9 @@
     scene.textContent = '';
     scene.setAttribute('viewBox', '0 0 ' + level.view.width + ' ' + level.view.height);
     $('stage-inner').style.aspectRatio = level.view.width + ' / ' + level.view.height;
+    // Small levels would otherwise be blown up until the switches dwarf the
+    // plant, so cap how far past 1:1 the diagram may scale.
+    $('stage-inner').style.maxWidth = Math.round(level.view.width * 1.35) + 'px';
 
     nodes = { vats: {}, pumps: {}, inlets: [] };
 
@@ -270,16 +273,19 @@
       var body = svg('rect', { class: 'vat-body', x: vat.x, y: vat.y, width: vat.w, height: vat.h });
       group.appendChild(body);
 
+      // Placed as fractions of the vat's height rather than fixed offsets, so
+      // the name and the reading stay clear of each other whatever size the
+      // vat is - the reservoir is much shorter than a working vat.
       var label = svg('text', {
         class: 'vat-label' + (isRes ? ' reservoir-label' : ''),
-        x: vat.cx, y: vat.y + (isRes ? 44 : 28)
+        x: vat.cx, y: vat.y + vat.h * (isRes ? 0.34 : 0.27)
       });
       label.textContent = isRes ? vat.label : vat.id;
       group.appendChild(label);
 
       var reading = svg('text', {
         class: 'vat-reading' + (isRes ? ' reservoir-reading' : ''),
-        x: vat.cx, y: vat.y + vat.h - (isRes ? 44 : 24)
+        x: vat.cx, y: vat.y + vat.h * (isRes ? 0.74 : 0.78)
       });
       group.appendChild(reading);
 
@@ -299,17 +305,17 @@
 
       // The glyph carries the same information as the colour, so on/off/
       // starving stay distinguishable without relying on hue.
-      var glyph = svg('text', { class: 'pump-glyph', x: pump.buttonX - 15, y: pump.buttonY + 1 });
+      var glyph = svg('text', { class: 'pump-glyph', x: pump.buttonX, y: pump.buttonY - 12 });
       group.appendChild(glyph);
 
-      var label = svg('text', { class: 'pump-label', x: pump.buttonX + 7, y: pump.buttonY + 1 });
+      var label = svg('text', { class: 'pump-label', x: pump.buttonX, y: pump.buttonY + 11 });
       label.textContent = pump.id;
       group.appendChild(label);
 
-      var rate = puzzle ? null : svg('text', { class: 'pump-rate', x: pump.buttonX, y: pump.buttonY + 11 });
+      var rate = puzzle ? null : svg('text', { class: 'pump-rate', x: pump.buttonX, y: pump.buttonY + 18 });
       if (rate) {
-        setAttr(label, 'y', pump.buttonY - 4);
-        setAttr(glyph, 'y', pump.buttonY - 4);
+        setAttr(label, 'y', pump.buttonY + 2);
+        setAttr(glyph, 'y', pump.buttonY - 15);
         group.appendChild(rate);
       }
 
