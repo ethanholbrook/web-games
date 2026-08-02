@@ -104,12 +104,12 @@ The whole site is 10 static files with no build step, so any static host works.
 **GitHub Pages** is wired up already: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
 publishes `index.html` and `games/` on every push to `main`, but only after the
 simulation, solver and level suites pass — so a level that can't be won never
-reaches a player. To turn it on, set **Settings → Pages → Source** to
-**GitHub Actions**. The site lands at `https://<user>.github.io/web-games/`.
+reaches a player. It needs no setup in the repository settings: the workflow
+turns Pages on itself. The site lands at `https://<user>.github.io/web-games/`.
 
-Note that Pages on a **private** repository needs a paid GitHub plan. If the
-repo stays private on a free plan, use Cloudflare Pages or Netlify instead —
-both serve private repos on their free tiers. Point either at the repo with:
+Pages needs the repository to be public, or a paid GitHub plan. To host a
+private repo for free, use Cloudflare Pages or Netlify instead. Point either at
+the repo with:
 
 | Setting | Value |
 |---|---|
