@@ -5,9 +5,11 @@
 # suite runs separately in ci.yml; this one sticks to the fast, dependency-free
 # checks so deploys stay quick.
 #
-# No manual setup needed: configure-pages turns Pages on itself via the API
-# (that is what `enablement: true` and the `pages: write` permission below are
-# for), so a fresh clone of this repo deploys without anyone visiting Settings.
+# One-time setup: repository Settings -> Pages -> Source: "GitHub Actions".
+# This cannot be done from the workflow. The `pages: write` permission below
+# lets it DEPLOY to a Pages site, but CREATING one needs repo-admin rights that
+# the default GITHUB_TOKEN does not have, so configure-pages with
+# `enablement: true` fails with "Resource not accessible by integration".
 name: Deploy
 
 on:
@@ -55,8 +57,6 @@ jobs:
           touch _site/.nojekyll
 
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
